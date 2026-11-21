@@ -16,6 +16,7 @@
     crop: { x: 0, y: 0, w: 100, h: 100 }, params: { threshold: 0.12, minlen: 18, simplify: 2 },
     preview: null, detectToken: 0, detecting: false,
     sel: null, pending: null, draft: null, drag: null, mouse: null, space: false,
+    userView: false, grid: true, baseV: 0, rotToken: 0, rotTimer: null,
     hist: [], redo: [], play: null, saveTimer: null, detectTimer: null,
   };
 
@@ -29,6 +30,7 @@
   }
   const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('image failed: ' + src)); i.src = src; });
   const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+  const baseUrl = () => `/p/${S.name}/base.jpg?${S.baseV}`;
   const imgSize = () => (S.stage === 'detect' ? S.project.scan_size : [S.ann.image.w, S.ann.image.h]);
   const bbCache = new WeakMap();
   const bbox = (L) => {
@@ -63,12 +65,13 @@
   function resize() {
     const dpr = devicePixelRatio || 1;
     cv.width = Math.round(wrap.clientWidth * dpr); cv.height = Math.round(wrap.clientHeight * dpr);
+    if (S.project && S.img && !S.userView) fit();
     render();
   }
   function fit() {
     if (!S.project) return;
     const [w, h] = imgSize(), cw = wrap.clientWidth, ch = wrap.clientHeight, k = Math.min(cw / w, ch / h) * 0.96;
-    S.view = { k, ox: (cw - w * k) / 2, oy: (ch - h * k) / 2 };
+    S.view = { k, ox: (cw - w * k) / 2, oy: (ch - h * k) / 2 }; S.userView = false;
   }
   const toWorld = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left - S.view.ox) / S.view.k, y: (e.clientY - r.top - S.view.oy) / S.view.k }; };
   const toScreen = (x, y) => [x * S.view.k + S.view.ox, y * S.view.k + S.view.oy];
@@ -101,7 +104,7 @@
     S.name = name; S.project = d.project; S.ann = d.annotations; S.crop = { ...d.project.crop }; S.params = { ...d.project.params };
     S.hist = []; S.redo = []; S.sel = null; S.preview = null; S.draft = null;
     if (d.project.stage === 'edit' && d.annotations) { S.img = await loadImg(`/p/${name}/work.jpg?${Date.now()}`); S.stage = 'edit'; }
-    else { S.img = await loadImg(`/p/${name}/scan.jpg`); S.stage = 'detect'; runDetect(); }
+    else { S.baseV = Date.now(); S.img = await loadImg(baseUrl()); S.stage = 'detect'; runDetect(); }
     fit(); buildTools(); buildPanel(); render(); status('');
   }
   async function newProject(file) {
@@ -131,8 +134,24 @@
     return [['nw', c.x, c.y], ['ne', r, c.y], ['sw', c.x, b], ['se', r, b], ['n', mx, c.y], ['s', mx, b], ['w', c.x, my], ['e', r, my]];
   }
   function hitCrop(p) {
-    for (const [n, x, y] of cropHandles()) if (Math.hypot(x - p.x, y - p.y) * S.view.k <= 11) return n;
-    const c = S.crop; return p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h ? 'move' : null;
+    const k = S.view.k, c = S.crop;
+    for (const [n, x, y] of cropHandles()) if (Math.hypot(x - p.x, y - p.y) * k <= 15) return n;
+    const t = 9 / k, inX = p.x >= c.x - t && p.x <= c.x + c.w + t, inY = p.y >= c.y - t && p.y <= c.y + c.h + t; // grab an edge anywhere along it
+    if (inX && Math.abs(p.y - c.y) <= t) return 'n';
+    if (inX && Math.abs(p.y - c.y - c.h) <= t) return 's';
+    if (inY && Math.abs(p.x - c.x) <= t) return 'w';
+    if (inY && Math.abs(p.x - c.x - c.w) <= t) return 'e';
+    return p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h ? 'move' : null;
+  }
+  function syncCropInputs() { for (const k of ['x', 'y', 'w', 'h']) { const el = $('#c_' + k); if (el && document.activeElement !== el) el.value = Math.round(S.crop[k]); } }
+  async function doRotate(q, a) {
+    const token = ++S.rotToken; status('rotating…');
+    try {
+      const res = await api(`/api/project/${S.name}/rotate`, { q, a });
+      if (token !== S.rotToken) return;
+      S.project = res.project; S.crop = { ...res.project.crop }; S.baseV = Date.now(); S.preview = null;
+      S.img = await loadImg(baseUrl()); fit(); buildPanel(); render(); runDetect(); status('rotated (original photo untouched)');
+    } catch (e) { status('rotate failed: ' + e.message); }
   }
   function dragCrop(p) {
     const d = S.drag, o = d.crop0, [W, H] = S.project.scan_size, dx = p.x - d.start.x, dy = p.y - d.start.y, min = 40;
@@ -159,7 +178,7 @@
     } catch (e) { status(''); alert('accept failed: ' + e.message); }
   }
   async function backToDetect() {
-    stopPlay(); S.img = await loadImg(`/p/${S.name}/scan.jpg`); S.stage = 'detect'; S.crop = { ...S.ann.crop }; S.params = { ...S.project.params };
+    stopPlay(); S.baseV = Date.now(); S.img = await loadImg(baseUrl()); S.stage = 'detect'; S.crop = { ...S.ann.crop }; S.params = { ...S.project.params };
     fit(); buildTools(); buildPanel(); render(); runDetect();
   }
 
@@ -284,8 +303,15 @@
       const pc = S.preview.crop, s = S.preview.scale;
       strokeLines(S.preview.lines.map((l) => ({ pts: l.map((p) => [pc.x + p[0] / s, pc.y + p[1] / s]) })), '#2f7bff', 2 * px);
     }
+    if (S.grid) {
+      const step = [10, 20, 25, 50, 100, 200, 250, 500].find((v) => v >= 60 / k) || 500;
+      ctx.strokeStyle = 'rgba(120,220,255,.5)'; ctx.lineWidth = px; ctx.beginPath();
+      for (let x = step; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+      for (let y = step; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+      ctx.stroke();
+    }
     ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = 2 * px; ctx.strokeRect(c.x, c.y, c.w, c.h);
-    ctx.fillStyle = '#ffd23f'; for (const [, x, y] of cropHandles()) ctx.fillRect(x - 5 * px, y - 5 * px, 10 * px, 10 * px);
+    ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#000'; ctx.lineWidth = px; for (const [, x, y] of cropHandles()) { ctx.fillRect(x - 7 * px, y - 7 * px, 14 * px, 14 * px); ctx.strokeRect(x - 7 * px, y - 7 * px, 14 * px, 14 * px); }
   }
   function renderEdit(k, px) {
     const A = S.ann, L = S.layers, { w, h } = A.image;
@@ -343,9 +369,17 @@
     if (!S.project) { el.innerHTML = '<p class="hint">No project yet. Use “+ New project…” to upload a photo of the drawing.</p>'; return; }
     if (S.stage === 'detect') {
       if (onlyDetectInfo && $('#dinfo')) { $('#dinfo').textContent = S.detecting ? 'detecting…' : S.preview ? `${S.preview.lines.length} lines in the crop` : ''; return; }
-      el.innerHTML = `<h4>1 · Crop</h4><p class="hint">Drag the yellow box (corners, edges, or the middle) to cut away the page border and anything around the drawing. Scroll = zoom, space/middle-drag = pan.</p>
+      const rot = S.project.rotation || { q: 0, a: 0 };
+      el.innerHTML = `<h4>1 · Rotate</h4>
+        <div class="row"><button id="rotL" title="Turn 90° counter-clockwise">↺ 90°</button><button id="rotR" title="Turn 90° clockwise">↻ 90°</button><button id="rotReset">Reset</button></div>
+        ${slider('p_rot', 'Straighten', -15, 15, 0.1, rot.a, (v) => (+v).toFixed(1) + '°')}
+        <div class="row"><label style="flex:1"><input type="checkbox" id="grid" ${S.grid ? 'checked' : ''}> Show grid (to level the page)</label></div>
+        <p class="hint">Applied to a copy; your original photo is never changed. Rotating resets the crop${S.project.stage === 'edit' ? ' and (on re-detect) your annotations' : ''}.</p>
+        <h4>2 · Crop</h4><p class="hint">Drag the yellow box: corners, anywhere along an edge, or the middle to move it. Scroll = zoom, space/middle-drag = pan. Or type exact numbers:</p>
+        <div class="row"><label style="flex:0 0 14px">x</label><input type="number" id="c_x" min="0"> <label style="flex:0 0 14px">y</label><input type="number" id="c_y" min="0"></div>
+        <div class="row"><label style="flex:0 0 14px">w</label><input type="number" id="c_w" min="40"> <label style="flex:0 0 14px">h</label><input type="number" id="c_h" min="40"></div>
         <div class="row"><button id="fitcrop">Reset crop</button><button id="fitview">Fit view</button></div>
-        <h4>Line detection</h4>
+        <h4>3 · Line detection</h4>
         ${slider('p_th', 'Sensitivity', 0.03, 0.35, 0.005, S.params.threshold, (v) => (+v).toFixed(3))}
         <p class="hint">Lower = picks up fainter pencil (and more noise).</p>
         ${slider('p_ml', 'Min line length', 0, 80, 1, S.params.minlen)}
@@ -357,11 +391,22 @@
         <p class="hint" id="dinfo">${S.detecting ? 'detecting…' : S.preview ? `${S.preview.lines.length} lines in the crop` : ''}</p>
         <button class="big" id="accept">${S.project.stage === 'edit' ? 'Re-detect &amp; keep annotating →' : 'Accept lines &amp; annotate →'}</button>
         ${S.project.stage === 'edit' ? '<button id="cancelDetect" style="width:100%">Cancel (back to annotating)</button>' : ''}`;
+      $('#rotL').onclick = () => doRotate((rot.q + 3) % 4, rot.a);
+      $('#rotR').onclick = () => doRotate((rot.q + 1) % 4, rot.a);
+      $('#rotReset').onclick = () => doRotate(0, 0);
+      $('#p_rot').oninput = (e) => { $('#p_rotv').textContent = (+e.target.value).toFixed(1) + '°'; clearTimeout(S.rotTimer); S.rotTimer = setTimeout(() => doRotate(rot.q, +e.target.value), 450); };
+      $('#grid').onchange = (e) => { S.grid = e.target.checked; render(); };
+      ['x', 'y', 'w', 'h'].forEach((k) => { const el = $('#c_' + k); el.oninput = () => {
+        const v = Math.round(+el.value); if (!Number.isFinite(v) || el.value === '') return;
+        const [W, H] = S.project.scan_size, c = { ...S.crop }; c[k] = v;
+        c.x = Math.max(0, Math.min(c.x, W - 40)); c.y = Math.max(0, Math.min(c.y, H - 40)); c.w = Math.max(40, Math.min(c.w, W - c.x)); c.h = Math.max(40, Math.min(c.h, H - c.y));
+        S.crop = c; render(); runDetect(600); }; });
+      syncCropInputs();
       const bind = (id, key, num) => { $(id).oninput = (e) => { S.params[key] = +e.target.value; $(id + 'v').textContent = num ? (+e.target.value).toFixed(num) : e.target.value; runDetect(350); }; };
       bind('#p_th', 'threshold', 3); bind('#p_ml', 'minlen', 0); bind('#p_sm', 'simplify', 1);
       $('#p_op').oninput = (e) => { S.scanOpacity = +e.target.value; $('#p_opv').textContent = (+e.target.value).toFixed(2); render(); };
       $('#showprev').onchange = (e) => { S.showPreview = e.target.checked; render(); };
-      $('#fitcrop').onclick = () => { const [W, H] = S.project.scan_size; S.crop = { x: 0, y: 0, w: W, h: H }; runDetect(); render(); };
+      $('#fitcrop').onclick = () => { const [W, H] = S.project.scan_size; S.crop = { x: 0, y: 0, w: W, h: H }; syncCropInputs(); runDetect(); render(); };
       $('#fitview').onclick = () => { fit(); render(); };
       $('#accept').onclick = accept;
       if ($('#cancelDetect')) $('#cancelDetect').onclick = async () => { S.img = await loadImg(`/p/${S.name}/work.jpg?${Date.now()}`); S.stage = 'edit'; fit(); buildTools(); buildPanel(); render(); };
@@ -402,7 +447,7 @@
   cv.addEventListener('wheel', (e) => {
     if (!S.project) return; e.preventDefault();
     const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = Math.pow(1.0015, -e.deltaY), v = S.view, nk = Math.max(0.05, Math.min(40, v.k * f));
-    v.ox = mx - ((mx - v.ox) * nk) / v.k; v.oy = my - ((my - v.oy) * nk) / v.k; v.k = nk; render();
+    v.ox = mx - ((mx - v.ox) * nk) / v.k; v.oy = my - ((my - v.oy) * nk) / v.k; v.k = nk; S.userView = true; render();
   }, { passive: false });
 
   cv.addEventListener('pointerdown', (e) => {
@@ -446,8 +491,8 @@
   cv.addEventListener('pointermove', (e) => {
     const p = toWorld(e); S.mouse = p; const d = S.drag;
     if (d) {
-      if (d.type === 'pan') { S.view.ox = d.ox + e.clientX - d.sx; S.view.oy = d.oy + e.clientY - d.sy; }
-      else if (d.type === 'crop') dragCrop(p);
+      if (d.type === 'pan') { S.view.ox = d.ox + e.clientX - d.sx; S.view.oy = d.oy + e.clientY - d.sy; S.userView = true; }
+      else if (d.type === 'crop') { dragCrop(p); syncCropInputs(); }
       else if (d.type === 'erase') eraseAt(p.x, p.y, S.opts.eraser);
       else if (d.type === 'play') S.play.pointer = p;
       else if (d.type === 'free') { const l = S.draft.pts[S.draft.pts.length - 1]; if (Math.hypot(l[0] - p.x, l[1] - p.y) > 2 / S.view.k) S.draft.pts.push([p.x, p.y]); }

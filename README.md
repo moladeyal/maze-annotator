@@ -22,7 +22,7 @@ Your drawings live in `./projects/<name>/` and are git-ignored — they never le
 
 ## Workflow
 
-**1 · Crop & detect.** Upload a photo (“+ New project…”). Drag the yellow crop box to cut away the page border, then tune the three sliders until the blue lines look about right:
+**1 · Rotate, crop & detect.** Upload a photo (“+ New project…”). Fix its orientation with the ↺/↻ 90° buttons and the *Straighten* slider (a grid helps level the page; this works on a copy, the original photo is never changed). Then drag the yellow crop box (corners, anywhere along an edge, or the middle) or type exact numbers to cut away the page border, and tune the three sliders until the blue lines look about right:
 
 | slider | what it does |
 |---|---|

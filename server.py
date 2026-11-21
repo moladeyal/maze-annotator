@@ -59,16 +59,54 @@ def write_json(path, obj):
     os.replace(tmp, path)
 
 
+def base_path(name):
+    """the image steps 1/2 work on: rotated copy if the user rotated, else the original scan"""
+    d = pdir(name)
+    b = os.path.join(d, "base.jpg")
+    return b if os.path.exists(b) else os.path.join(d, "scan.jpg")
+
+
 def get_scan(name):
-    path = os.path.join(pdir(name), "scan.jpg")
-    mtime = os.path.getmtime(path)
+    path = base_path(name)
+    key = (path, os.path.getmtime(path))
     hit = _scan_cache.get(name)
-    if hit and hit[0] == mtime:
+    if hit and hit[0] == key:
         return hit[1]
     im = detect.load_scan(path)
     _scan_cache.clear()
-    _scan_cache[name] = (mtime, im)
+    _scan_cache[name] = (key, im)
     return im
+
+
+def rotate_base(name, q, a):
+    """base.jpg = scan.jpg turned by q quarter-turns (clockwise) and then straightened by a degrees (clockwise).
+    scan.jpg itself is never touched."""
+    d = pdir(name)
+    q = int(q) % 4
+    a = max(-45.0, min(45.0, float(a)))
+    im = detect.load_scan(os.path.join(d, "scan.jpg"))
+    if q:
+        im = cv2.rotate(im, [None, cv2.ROTATE_90_CLOCKWISE, cv2.ROTATE_180, cv2.ROTATE_90_COUNTERCLOCKWISE][q])
+    if abs(a) > 0.01:
+        h, w = im.shape[:2]
+        M = cv2.getRotationMatrix2D((w / 2, h / 2), -a, 1.0)  # cv2: positive = counter-clockwise
+        c, sn = abs(M[0, 0]), abs(M[0, 1])
+        nw, nh = int(h * sn + w * c), int(h * c + w * sn)
+        M[0, 2] += nw / 2 - w / 2
+        M[1, 2] += nh / 2 - h / 2
+        im = cv2.warpAffine(im, M, (nw, nh), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    path = os.path.join(d, "base.jpg")
+    if q == 0 and abs(a) <= 0.01:
+        if os.path.exists(path):
+            os.remove(path)
+    else:
+        cv2.imwrite(path, im, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    H, W = im.shape[:2]
+    proj = read_json(os.path.join(d, "project.json"))
+    proj.update({"rotation": {"q": q, "a": round(a, 2)}, "scan_size": [W, H], "crop": {"x": 0, "y": 0, "w": W, "h": H}})
+    write_json(os.path.join(d, "project.json"), proj)
+    _scan_cache.clear()
+    return proj
 
 
 def create_project(name, image_bytes):
@@ -83,10 +121,12 @@ def create_project(name, image_bytes):
         H, W = im.shape[:2]
     os.makedirs(d, exist_ok=True)
     cv2.imwrite(os.path.join(d, "scan.jpg"), im, [cv2.IMWRITE_JPEG_QUALITY, 93])
+    if os.path.exists(os.path.join(d, "base.jpg")):
+        os.remove(os.path.join(d, "base.jpg"))
     proj = {"name": name, "stage": "detect", "scan_size": [W, H],
             "crop": {"x": 0, "y": 0, "w": W, "h": H},
             "params": {"threshold": 0.12, "minlen": 18, "simplify": 2.0},
-            "hero_radius": 4}
+            "rotation": {"q": 0, "a": 0}, "hero_radius": 4}
     write_json(os.path.join(d, "project.json"), proj)
     _scan_cache.clear()
     return proj
@@ -106,12 +146,13 @@ def accept(name, crop, params):
     cv2.imwrite(os.path.join(d, "work.jpg"), work, [cv2.IMWRITE_JPEG_QUALITY, 93])
     h, w = work.shape[:2]
     old = read_json(os.path.join(d, "annotations.json"), None)
-    same = bool(old and old.get("crop") == c and abs(old.get("scale", 0) - scale) < 1e-9)
+    rot = (read_json(os.path.join(d, "project.json")) or {}).get("rotation", {"q": 0, "a": 0})
+    same = bool(old and old.get("crop") == c and abs(old.get("scale", 0) - scale) < 1e-9 and old.get("rotation", {"q": 0, "a": 0}) == rot)
     ann = dict(old) if same else {}
     kept = [l for l in (old or {}).get("lines", []) if l.get("src") == "drawn"] if same else []
     auto = [{"id": f"a{i + 1}", "pts": p, "src": "auto"} for i, p in enumerate(lines)]
     ann.update({"version": 1, "image": {"w": w, "h": h, "file": "work.jpg"}, "scale": scale, "crop": c,
-                "lines": auto + kept})
+                "rotation": rot, "lines": auto + kept})
     ann.setdefault("regions", [])
     ann.setdefault("portals", [])
     ann["reset"] = not same and bool(old)  # told to the client so it can warn
@@ -208,9 +249,10 @@ class H(BaseHTTPRequestHandler):
             if proj is None:
                 raise FileNotFoundError
             return self.send(200, {"project": proj, "annotations": read_json(os.path.join(d, "annotations.json"))})
-        m = re.match(r"^/p/([^/]+)/(scan|work)\.jpg$", p)
+        m = re.match(r"^/p/([^/]+)/(scan|work|base)\.jpg$", p)
         if m:
-            with open(os.path.join(pdir(m.group(1)), m.group(2) + ".jpg"), "rb") as f:
+            path = base_path(m.group(1)) if m.group(2) == "base" else os.path.join(pdir(m.group(1)), m.group(2) + ".jpg")
+            with open(path, "rb") as f:
                 return self.send(200, f.read(), "image/jpeg")
         # static files
         rel = "index.html" if p in ("", "/") else p.lstrip("/")
@@ -228,7 +270,7 @@ class H(BaseHTTPRequestHandler):
             if os.path.exists(os.path.join(pdir(name), "project.json")):
                 raise ValueError(f"project '{name}' already exists")
             return self.send(200, create_project(name, self.body()))
-        m = re.match(r"^/api/project/([^/]+)/(detect|accept|annotations|project|export)$", p)
+        m = re.match(r"^/api/project/([^/]+)/(detect|accept|annotations|project|export|rotate)$", p)
         if not m:
             raise FileNotFoundError
         name, op = m.groups()
@@ -250,6 +292,10 @@ class H(BaseHTTPRequestHandler):
                    "simplify": float(par.get("simplify", 2.0))}
             ann, proj = accept(name, b.get("crop", {}), par)
             return self.send(200, {"annotations": ann, "project": proj})
+        if op == "rotate":
+            b = self.jbody()
+            with LOCK:
+                return self.send(200, {"project": rotate_base(name, b.get("q", 0), b.get("a", 0))})
         if op == "annotations":
             save_annotations(name, self.jbody())
             return self.send(200, {"ok": True})
