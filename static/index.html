@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maze annotator</title>
+<style>
+ *{box-sizing:border-box}
+ html,body{margin:0;height:100%;background:#1b1b1d;color:#e6e6e6;font:13px/1.4 system-ui,sans-serif;overflow:hidden}
+ header{height:40px;display:flex;align-items:center;gap:10px;padding:0 10px;background:#111;border-bottom:1px solid #333}
+ header b{margin-right:6px}
+ .step{padding:3px 10px;border-radius:12px;background:#2a2a2d;color:#999}
+ .step.on{background:#2563eb;color:#fff}
+ #status{margin-left:auto;color:#9a9}
+ #main{position:absolute;top:40px;bottom:0;left:0;right:0;display:flex}
+ #tools{width:58px;background:#151517;border-right:1px solid #333;display:flex;flex-direction:column;gap:4px;padding:6px 4px}
+ #tools button{padding:6px 2px;font-size:12px}
+ #wrap{flex:1;position:relative;min-width:0}
+ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+ #panel{width:280px;background:#151517;border-left:1px solid #333;padding:10px;overflow:auto}
+ button,select,input[type=text]{background:#2c2c30;color:#eee;border:1px solid #444;border-radius:5px;padding:4px 8px;font:inherit}
+ button{cursor:pointer} button:hover{background:#3a3a40} button.on{background:#2563eb;border-color:#2563eb;color:#fff}
+ button.big{width:100%;padding:8px;margin:6px 0;background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+ button:disabled{opacity:.4;cursor:default}
+ h4{margin:14px 0 6px;font-size:12px;color:#aaa;text-transform:uppercase;letter-spacing:.05em}
+ .row{display:flex;align-items:center;gap:6px;margin:4px 0}
+ .row label{flex:0 0 108px;color:#bbb} .row input[type=range]{flex:1;min-width:0} .row .v{width:40px;text-align:right;color:#9bf}
+ .item{display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer}
+ .item:hover{background:#26262a} .item.sel{background:#1e3a8a}
+ .item .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .dot{width:10px;height:10px;border-radius:50%}
+ .hint{color:#8a8a90;font-size:12px;margin:4px 0}
+ kbd{background:#333;border-radius:3px;padding:0 4px;font-size:11px}
+</style></head><body>
+<header>
+  <b>Maze annotator</b>
+  <select id="proj"></select>
+  <button id="newProj">+ New project…</button>
+  <input id="file" type="file" accept="image/*" hidden>
+  <span class="step" id="st1">1 · Crop &amp; detect</span><span>→</span><span class="step" id="st2">2 · Annotate</span>
+  <span id="status"></span>
+</header>
+<div id="main">
+  <div id="tools"></div>
+  <div id="wrap"><canvas id="cv"></canvas></div>
+  <div id="panel"></div>
+</div>
+<script src="game-core.js"></script>
+<script src="app.js"></script>
+</body></html>

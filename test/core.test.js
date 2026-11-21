@@ -1,0 +1,80 @@
+// run: node test/core.test.js
+const MC = require("../static/game-core.js");
+const assert = require("assert");
+let n = 0; const ok = (c, m) => { assert(c, m); n++; };
+
+// two rooms 100x60 each, separated by a solid wall at x=100; a closed outer box.
+const box = (x0, y0, x1, y1) => ({ pts: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]] });
+const lines = [box(5, 5, 195, 105), { pts: [[100, 5], [100, 105]] }];
+const f = MC.buildField(lines, 200, 110);
+
+// collision
+ok(MC.walkable(f, 50, 50, 4), "open floor walkable");
+ok(!MC.walkable(f, 100, 50, 4), "wall blocks");
+ok(!MC.walkable(f, 103, 50, 4), "hero radius keeps distance from wall");
+ok(!MC.walkable(f, 2, 50, 4), "outside the box blocked");
+ok(MC.walkable(f, 50, 50, 20) && !MC.walkable(f, 20, 50, 20), "bigger hero needs more clearance");
+
+// movement + sliding
+let h = MC.newHero(50, 50, 4);
+MC.moveHero(f, h, 1, 0, 200);
+ok(h.x < 100 && h.x > 90, "stops at the wall, x=" + h.x);
+h = MC.newHero(90, 50, 4); const y0 = h.y;
+MC.moveHero(f, h, 0.7071, 0.7071, 40);
+ok(h.y > y0 + 20, "slides along the wall when moving diagonally into it");
+h = MC.newHero(50, 50, 4); MC.moveHero(f, h, 1, 0, 3000);
+ok(h.x < 100, "very long step cannot tunnel through a wall");
+
+// input
+const kv = (...k) => MC.keyVector(new Set(k));
+ok(kv()[0] === 0 && kv()[1] === 0, "no keys");
+let v = kv("ArrowRight", "ArrowDown");
+ok(Math.abs(v[0] - 0.7071) < 1e-3 && Math.abs(v[1] - 0.7071) < 1e-3, "two arrows = normalised diagonal");
+v = kv("KeyW", "KeyA"); ok(v[0] < 0 && v[1] < 0, "WASD diagonals");
+v = kv("Numpad9"); ok(v[0] > 0 && v[1] < 0, "numpad diagonal");
+ok(kv("ArrowLeft", "ArrowRight")[0] === 0, "opposite arrows cancel");
+v = MC.pointerVector({ x: 10, y: 10 }, { x: 20, y: 20 }); ok(v[0] > 0 && v[1] > 0, "pointer pulls toward it");
+ok(MC.pointerVector({ x: 10, y: 10 }, { x: 11, y: 10 })[0] === 0, "pointer dead zone");
+
+// regions
+const poly = { id: "p", shape: "polygon", pts: [[0, 0], [10, 0], [10, 10], [0, 10]] };
+const ell = { id: "e", shape: "ellipse", cx: 50, cy: 50, rx: 10, ry: 5 };
+ok(MC.regionContains(poly, 5, 5) && !MC.regionContains(poly, 15, 5), "polygon contains");
+ok(MC.regionContains(ell, 59, 50) && !MC.regionContains(ell, 50, 57), "ellipse contains");
+ok(Math.abs(MC.regionCenter(poly)[0] - 5) < 1e-6 && Math.abs(MC.regionCenter(poly)[1] - 5) < 1e-6, "polygon centre");
+const thin = { id: "t", shape: "polygon", pts: [[0, 0], [10, 0], [10, 0], [0, 0]] };
+ok(MC.regionCenter(thin).every(Number.isFinite), "degenerate polygon has a finite centre");
+ok(Math.abs(MC.regionArea(ell) - Math.PI * 50) < 1e-6, "ellipse area");
+ok(MC.findRegion([{ name: " Start " }], "start"), "findRegion is case/space insensitive");
+
+// portals: A in left room <-> B in right room, thin regions
+const A = { id: "A", shape: "polygon", pts: [[40, 40], [44, 40], [44, 60], [40, 60]] };
+const B = { id: "B", shape: "polygon", pts: [[150, 40], [154, 40], [154, 60], [150, 60]] };
+const regs = [A, B];
+const both = [{ id: "p1", a: "A", b: "B", dir: "both" }];
+h = MC.newHero(30, 50, 4);
+MC.moveHero(f, h, 1, 0, 11); let hit = MC.updatePortals(f, h, regs, both);
+ok(hit && hit.to === "B", "walking into A teleports to B");
+ok(Math.abs(h.x - 152) < 2, "lands at the centre of B, x=" + h.x);
+ok(MC.updatePortals(f, h, regs, both) === null, "no instant bounce back while still inside B");
+MC.moveHero(f, h, 1, 0, 20); MC.updatePortals(f, h, regs, both);
+ok(!h.inactive.has("B"), "B re-arms after moving away");
+MC.moveHero(f, h, -1, 0, 20); hit = MC.updatePortals(f, h, regs, both);
+ok(hit && hit.to === "A", "bidirectional: walking back into B returns to A");
+// one-way
+const ab = [{ id: "p2", a: "A", b: "B", dir: "ab" }];
+h = MC.newHero(152, 50, 4); ok(MC.updatePortals(f, h, regs, ab) === null, "a->b portal does not fire from B");
+h = MC.newHero(42, 50, 4); ok(MC.updatePortals(f, h, regs, ab) !== null, "a->b portal fires from A");
+const ba = [{ id: "p3", a: "A", b: "B", dir: "ba" }];
+h = MC.newHero(42, 50, 4); ok(MC.updatePortals(f, h, regs, ba) === null, "b->a portal does not fire from A");
+h = MC.newHero(152, 50, 4); hit = MC.updatePortals(f, h, regs, ba); ok(hit && hit.to === "A", "b->a portal fires from B");
+// landing spot inside a wall gets nudged to a walkable point
+const wallRegion = { id: "W", shape: "polygon", pts: [[99, 40], [101, 40], [101, 60], [99, 60]] };
+h = MC.newHero(42, 50, 4);
+MC.updatePortals(f, h, [A, wallRegion], [{ id: "p4", a: "A", b: "W", dir: "ab" }]);
+ok(MC.walkable(f, h.x, h.y, 4), "landing point on a wall is nudged to open floor");
+// region borders do not block
+h = MC.newHero(20, 80, 4); MC.moveHero(f, h, 1, 0, 60);
+ok(h.x > 70, "regions never block movement (no portals here)");
+
+console.log("core tests passed:", n);
