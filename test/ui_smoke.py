@@ -17,6 +17,16 @@ def check(c, m):
     if not c: fails.append(m)
 def api(path): return json.load(urllib.request.urlopen(URL.rstrip("/") + path))
 
+PIXJS = """()=>{const S=window.__S,cv=document.querySelector('#cv'),ctx=cv.getContext('2d');
+ const sx=cv.width/cv.clientWidth, sy=cv.height/cv.clientHeight, c=S.crop;
+ const H={nw:[c.x,c.y],n:[c.x+c.w/2,c.y],ne:[c.x+c.w,c.y],e:[c.x+c.w,c.y+c.h/2],se:[c.x+c.w,c.y+c.h],s:[c.x+c.w/2,c.y+c.h],sw:[c.x,c.y+c.h],w:[c.x,c.y+c.h/2]};
+ const out={bitmap:[cv.width,cv.height],css:[cv.clientWidth,cv.clientHeight],dpr:devicePixelRatio,handles:{}};
+ for(const [n,[x,y]] of Object.entries(H)){const px=Math.round((x*S.view.k+S.view.ox)*sx),py=Math.round((y*S.view.k+S.view.oy)*sy);
+  const d=ctx.getImageData(Math.max(0,px-1),Math.max(0,py-1),3,3).data; let yellow=0;
+  for(let i=0;i<d.length;i+=4) if(d[i]>200&&d[i+1]>170&&d[i+2]<120) yellow++;
+  out.handles[n]=yellow>0;}
+ return out;}"""
+
 try:
     with sync_playwright() as pw:
         b = pw.chromium.launch()
@@ -33,6 +43,22 @@ try:
         pg.wait_for_function("window.__S && window.__S.project && window.__S.stage==='detect' && window.__S.preview", timeout=60000)
         check(S("S.project.scan_size[0]") > 0, "project created, scan loaded: %s" % S("S.project.scan_size"))
         n0 = S("S.preview.lines.length"); check(n0 > 50, "initial detection found lines: %d" % n0)
+        def pix_ok(label):
+            r = pg.evaluate(PIXJS); bad = [n for n, v in r["handles"].items() if not v]
+            check(not bad and r["bitmap"][0] == round(r["css"][0] * r["dpr"]) and r["bitmap"][1] == round(r["css"][1] * r["dpr"]),
+                  "%s: canvas bitmap matches its size and crop handles are drawn where they are hit-tested (bad: %s; bitmap %s vs css %s)" % (label, bad or "none", r["bitmap"], r["css"]))
+        pix_ok("step 1 after load")
+        box0 = pg.locator("#cv").bounding_box()
+        for hname in ["nw", "n", "ne", "e", "se", "s", "sw", "w"]:   # real mouse drag of each of the 8 handles from the full-image default crop
+            pg.evaluate("() => { const [W, H] = window.__S.project.scan_size; window.__S.crop = { x: 0, y: 0, w: W, h: H }; }")
+            hx, hy = S("(()=>{const c=S.crop,m={nw:[c.x,c.y],n:[c.x+c.w/2,c.y],ne:[c.x+c.w,c.y],e:[c.x+c.w,c.y+c.h/2],se:[c.x+c.w,c.y+c.h],s:[c.x+c.w/2,c.y+c.h],sw:[c.x,c.y+c.h],w:[c.x,c.y+c.h/2]}['%s'];return [m[0]*S.view.k+S.view.ox,m[1]*S.view.k+S.view.oy]})()" % hname)
+            c0 = S("({...S.crop})")
+            pg.mouse.move(box0["x"] + hx, box0["y"] + hy); pg.mouse.down()
+            pg.mouse.move(box0["x"] + hx + (-45 if "e" in hname else 45 if "w" in hname else 0), box0["y"] + hy + (-45 if "s" in hname else 45 if "n" in hname else 0), steps=5); pg.mouse.up()
+            c1 = S("({...S.crop})")
+            resized = (c1["w"] != c0["w"] or c1["h"] != c0["h"]) and not (c1["x"] != c0["x"] and c1["w"] == c0["w"] and "w" not in hname)
+            check(resized, "handle '%s' resizes the crop instead of moving it (%s -> %s)" % (hname, c0, c1))
+        pg.evaluate("() => { const [W, H] = window.__S.project.scan_size; window.__S.crop = { x: 0, y: 0, w: W, h: H }; }")
         # ---- rotation (the copy gets rotated; scan.jpg is untouched)
         w_b, h_b = S("S.project.scan_size")
         pg.click("#rotR"); pg.wait_for_function("window.__S.project.rotation.q===1 && window.__S.project.scan_size[0]===%d && !window.__S.detecting && window.__S.preview" % h_b, timeout=40000)
@@ -165,6 +191,9 @@ try:
         pg3.goto("http://127.0.0.1:8125/index.html"); time.sleep(1.5)
         pg3.keyboard.down("ArrowRight"); time.sleep(0.5); pg3.keyboard.up("ArrowRight")
         pg3.screenshot(path="/tmp/ui_game.png"); gsrv.terminate()
+        # returning to step 1 from step 2 changes the layout again (tools column hides): handles must still line up
+        pg.click("#redetect"); pg.wait_for_function("window.__S.stage==='detect'", timeout=20000); time.sleep(0.6)
+        pix_ok("step 1 after coming back from step 2")
         b.close()
     check(not errs, "no console/page errors: %s" % errs[:3])
 finally:

@@ -64,7 +64,7 @@
   /* ---------------- view ---------------- */
   function resize() {
     const dpr = devicePixelRatio || 1;
-    cv.width = Math.round(wrap.clientWidth * dpr); cv.height = Math.round(wrap.clientHeight * dpr);
+    cv.width = Math.max(1, Math.round(cv.clientWidth * dpr)); cv.height = Math.max(1, Math.round(cv.clientHeight * dpr));
     if (S.project && S.img && !S.userView) fit();
     render();
   }
@@ -287,10 +287,10 @@
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s * Math.cos(ang - 0.45), y - s * Math.sin(ang - 0.45)); ctx.lineTo(x - s * Math.cos(ang + 0.45), y - s * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
   }
   function render() {
-    const dpr = devicePixelRatio || 1, v = S.view;
+    const v = S.view, dpr = cv.width / Math.max(1, cv.clientWidth), dprY = cv.height / Math.max(1, cv.clientHeight);
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#242426'; ctx.fillRect(0, 0, cv.width, cv.height);
     if (!S.project || !S.img) { ctx.fillStyle = '#888'; ctx.font = `${16 * dpr}px sans-serif`; ctx.fillText('Create a project: “+ New project…” and pick a scan photo', 30 * dpr, 50 * dpr); return; }
-    ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.ox, dpr * v.oy);
+    ctx.setTransform(dpr * v.k, 0, 0, dprY * v.k, dpr * v.ox, dprY * v.oy);
     const k = v.k, px = 1 / k; // 1 screen pixel in world units
     if (S.stage === 'detect') renderDetect(k, px); else renderEdit(k, px);
   }
@@ -547,6 +547,7 @@
   addEventListener('blur', () => { S.space = false; if (S.play) S.play.keys.clear(); });
   $('#panel').addEventListener('change', (e) => { if (e.target.type === 'range') e.target.blur(); });
   addEventListener('resize', resize);
+  new ResizeObserver(resize).observe(wrap); // also fires when the tools column shows/hides, which changes the canvas width
 
   $('#proj').onchange = (e) => openProject(e.target.value);
   $('#newProj').onclick = () => $('#file').click();
