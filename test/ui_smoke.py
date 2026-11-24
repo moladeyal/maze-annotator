@@ -108,6 +108,12 @@ try:
         # ---- accept -> step 2
         pg.click("#accept"); pg.wait_for_function("window.__S.stage==='edit'", timeout=60000)
         L0 = S("S.ann.lines.length"); check(L0 > 50, "accepted, annotating with %d lines" % L0)
+        time.sleep(0.6); box = pg.locator("#cv").bounding_box()   # step 2 shows the tools column, which shifts the canvas: re-measure
+        pg.click("#tipsBtn")
+        tips = pg.inner_text("#tips")
+        check(pg.is_visible("#tips") and "Erase the circle" in tips and "bigger" in tips and "mouse pointer" in tips, "Tips popup opens and has the circle/portal tip and the 'hero starts at the pointer' tip")
+        pg.keyboard.press("Escape"); check(not pg.is_visible("#tips"), "Esc closes the Tips popup")
+        pg.keyboard.press("Shift+Slash"); check(pg.is_visible("#tips"), "? opens the Tips popup"); pg.click("#tipsClose"); check(not pg.is_visible("#tips"), "close button works")
         k, ox, oy = S("S.view.k"), S("S.view.ox"), S("S.view.oy")
         W, H = S("S.ann.image.w"), S("S.ann.image.h")
         scr = lambda x, y: (box["x"] + x * k + ox, box["y"] + y * k + oy)
@@ -170,6 +176,16 @@ try:
         check(moved > 5, "hero moves with arrows incl. diagonal (%.0f px)" % moved)
         check(S("MazeCore.walkable(S.play.field,S.play.hero.x,S.play.hero.y,S.play.hero.r)"), "hero stays on walkable ground")
         pg.keyboard.press("Escape"); check(S("!S.play"), "Esc stops playtest")
+        # no region called 'start': the hero begins where the mouse pointer was, also when started from the Play button
+        pg.evaluate("() => { window.__S.ann.regions[0].name = 'start_tmp'; }")
+        for how in ("P key", "Play button"):
+            pg.mouse.move(*scr(hx0, hy0)); time.sleep(0.1)
+            if how == "P key": pg.keyboard.press("p")
+            else: pg.click("#play")
+            hxx, hyy = S("S.play ? [S.play.hero.x, S.play.hero.y] : [-1,-1]")
+            check(abs(hxx - hx0) < 12 and abs(hyy - hy0) < 12, "%s starts the hero at the pointer (%.0f,%.0f vs %.0f,%.0f)" % (how, hxx, hyy, hx0, hy0))
+            pg.keyboard.press("Escape")
+        pg.evaluate("() => { window.__S.ann.regions[0].name = 'start'; }")
 
         # ---- persistence (autosave)
         time.sleep(1.2)

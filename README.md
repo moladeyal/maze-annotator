@@ -48,6 +48,8 @@ Lines (detected or drawn) block the hero; regions do not. A *tunnel* is simply t
 A portal is inactive after you land in it until you've moved out again, so you can't bounce back and forth.
 Layer toggles on the right show/hide the scan, detected lines, drawn lines, regions and portals. Everything autosaves (with timestamped backups in `projects/<name>/backups/`).
 
+The **💡 Tips** button (or `?`) opens a list of tips, e.g. how to mark a drawn circle as a portal region (erase its lines first, draw the region slightly bigger) and how the playtest picks where the hero starts.
+
 Movement: arrows, WASD or the numpad (two keys = diagonal), or hold the mouse/finger down to walk toward it. Hero size defaults to very small.
 
 **Export** writes a static folder `dist/<name>/` (`index.html`, `game-core.js`, `work.jpg`, `annotations.json`) that any static host can serve.

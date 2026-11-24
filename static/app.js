@@ -256,7 +256,8 @@
     if (S.stage !== 'edit' || S.play) return;
     const { w, h } = S.ann.image, field = MC.buildField(S.ann.lines, w, h), r = S.project.hero_radius || 4;
     const st = MC.findRegion(S.ann.regions, 'start');
-    let c = st ? MC.regionCenter(st) : (S.mouse && S.mouse.x >= 0 && S.mouse.x < w && S.mouse.y >= 0 && S.mouse.y < h ? [S.mouse.x, S.mouse.y] : [w / 2, h / 2]);
+    const m = S.lastMouse;
+    let c = st ? MC.regionCenter(st) : (m && m.x >= 0 && m.x < w && m.y >= 0 && m.y < h ? [m.x, m.y] : [w / 2, h / 2]);
     const p = MC.nearestWalkable(field, c[0], c[1], r, 80), hero = MC.newHero(p[0], p[1], r);
     for (const q of S.ann.portals) for (const id of [q.a, q.b]) { const R = S.ann.regions.find((x) => x.id === id); if (R && MC.regionContains(R, hero.x, hero.y)) hero.inactive.add(id); }
     S.play = { field, hero, keys: new Set(), pointer: null, last: performance.now(), raf: 0, speed: MC.speedFor(w, h) };
@@ -442,6 +443,34 @@
     $('#redetect').onclick = backToDetect;
   }
 
+  /* ---------------- tips popup ---------------- */
+  const TIPS = [
+    ['Getting around', [
+      'Scroll to zoom. Hold <kbd>Space</kbd> and drag (or drag with the middle/right mouse button) to pan.',
+      '<kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redoes. Everything autosaves, with timestamped backups.']],
+    ['Step 1 · rotate, crop, detect', [
+      'Use the grid with <b>Straighten</b> to level the page, then crop away the page border.',
+      'Faint pencil missing? Lower <b>Sensitivity</b>. Specks everywhere? Raise <b>Min line length</b>. Do this before erasing: re-detecting replaces the auto-detected lines.']],
+    ['Step 2 · lines', [
+      'Use the eraser on anything that is not a wall: stickers, handwriting, arrows, shadows. <kbd>[</kbd> and <kbd>]</kbd> change its size.',
+      'Lines you draw block the hero just like detected ones. Regions never block.']],
+    ['Regions &amp; portals', [
+      '<b>Marking a circle (e.g. a trampoline) as a portal region:</b> the circle\'s own pencil lines are detected as walls, so the hero can\'t get inside it, and a region the hero can\'t reach never fires. <b>Erase the circle\'s lines first</b>, then draw the region slightly <b>bigger</b> than the circle so it overlaps the corridor.',
+      'A tunnel is two very thin regions across its two mouths, joined by a bidirectional portal (the ↔ button in the list).',
+      'After you land in a portal region it stays inactive until you walk out of it, so you can\'t bounce back and forth.',
+      'Name a region <code>start</code> to choose where the hero starts.']],
+    ['Playtest', [
+      '<b>Hover the spot you want, then press <kbd>P</kbd>.</b> Unless a region is named <code>start</code>, the hero starts where your mouse pointer is (moved to the nearest open floor if it is on a wall). The Play button works too, but it uses the last place the pointer was over the picture, which is usually the edge you crossed on the way to the button, so <kbd>P</kbd> is more precise.',
+      'Move with arrows, WASD or the numpad (two keys = diagonal), or hold the mouse button down to walk toward it. <kbd>Esc</kbd> or <kbd>P</kbd> stops.',
+      'The hero size slider is in the panel; the default is very small.']],
+  ];
+  $('#tipsBody').innerHTML = TIPS.map(([title, items]) => `<h4>${title}</h4><ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul>`).join('');
+  const showTips = () => { $('#tips').hidden = false; };
+  const hideTips = () => { $('#tips').hidden = true; };
+  $('#tipsBtn').onclick = () => ($('#tips').hidden ? showTips() : hideTips());
+  $('#tipsClose').onclick = hideTips;
+  $('#tips').addEventListener('pointerdown', (e) => { if (e.target.id === 'tips') hideTips(); });
+
   /* ---------------- pointer / keyboard ---------------- */
   cv.addEventListener('contextmenu', (e) => e.preventDefault());
   cv.addEventListener('wheel', (e) => {
@@ -489,7 +518,7 @@
     }
   });
   cv.addEventListener('pointermove', (e) => {
-    const p = toWorld(e); S.mouse = p; const d = S.drag;
+    const p = toWorld(e); S.mouse = p; S.lastMouse = p; const d = S.drag;
     if (d) {
       if (d.type === 'pan') { S.view.ox = d.ox + e.clientX - d.sx; S.view.oy = d.oy + e.clientY - d.sy; S.userView = true; }
       else if (d.type === 'crop') { dragCrop(p); syncCropInputs(); }
@@ -524,6 +553,8 @@
   addEventListener('keydown', (e) => {
     const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement && document.activeElement.tagName) && document.activeElement.type !== 'range' && document.activeElement.type !== 'checkbox';
     if (typing) return;
+    if (!$('#tips').hidden) { if (e.code === 'Escape' || e.key === '?') { hideTips(); e.preventDefault(); } return; }
+    if (e.key === '?') { showTips(); e.preventDefault(); return; }
     if (e.code === 'Space') { S.space = true; e.preventDefault(); }
     if (S.play) {
       if (e.code === 'KeyP' || e.code === 'Escape') { stopPlay(); return; }
