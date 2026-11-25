@@ -457,6 +457,7 @@
     ['Regions &amp; portals', [
       '<b>Marking a circle (e.g. a trampoline) as a portal region:</b> the circle\'s own pencil lines are detected as walls, so the hero can\'t get inside it, and a region the hero can\'t reach never fires. <b>Erase the circle\'s lines first</b>, then draw the region slightly <b>bigger</b> than the circle so it overlaps the corridor.',
       'A tunnel is two very thin regions across its two mouths, joined by a bidirectional portal (the ↔ button in the list).',
+      '<b>Tunnel ends:</b> after placing the thin portal region across each mouth, also draw lines (Line tool) on the <b>in-tunnel side</b> of those portals. They block the hero from walking into the area of the actual tunnel, so the only way through is the portal.',
       'After you land in a portal region it stays inactive until you walk out of it, so you can\'t bounce back and forth.',
       'Name a region <code>start</code> to choose where the hero starts.']],
     ['Playtest', [

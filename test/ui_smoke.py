@@ -111,7 +111,7 @@ try:
         time.sleep(0.6); box = pg.locator("#cv").bounding_box()   # step 2 shows the tools column, which shifts the canvas: re-measure
         pg.click("#tipsBtn")
         tips = pg.inner_text("#tips")
-        check(pg.is_visible("#tips") and "Erase the circle" in tips and "bigger" in tips and "mouse pointer" in tips, "Tips popup opens and has the circle/portal tip and the 'hero starts at the pointer' tip")
+        check(pg.is_visible("#tips") and "Erase the circle" in tips and "bigger" in tips and "mouse pointer" in tips and "in-tunnel side" in tips, "Tips popup opens and has the circle/portal tip and the 'hero starts at the pointer' tip")
         pg.keyboard.press("Escape"); check(not pg.is_visible("#tips"), "Esc closes the Tips popup")
         pg.keyboard.press("Shift+Slash"); check(pg.is_visible("#tips"), "? opens the Tips popup"); pg.click("#tipsClose"); check(not pg.is_visible("#tips"), "close button works")
         k, ox, oy = S("S.view.k"), S("S.view.ox"), S("S.view.oy")
