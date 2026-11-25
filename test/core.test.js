@@ -120,4 +120,9 @@ ok(outers.length === 2 && outers.every((o) => o > 3 * (r0 + 2.5)) && outers[0] !
 const rr = [{ id: "a", shape: "polygon", pts: [[0, 0], [2, 0], [2, 2], [0, 2]] }, { id: "b", shape: "polygon", pts: [[10, 0], [12, 0], [12, 2], [10, 2]] }];
 const vl = MC.visiblePortalLines(rr, [{ id: "p1", a: "a", b: "b", dir: "both", dashed: true }, { id: "p2", a: "a", b: "b", dir: "ab" }]);
 ok(vl.length === 1 && vl[0].id === "p1" && Math.abs(vl[0].x2 - vl[0].x1 - 10) < 1e-9, "only portals flagged dashed produce a visible line");
+// drawn body is 1.5x larger, collision radius untouched
+const arcs = []; const cx2 = new Proxy({}, { get: (_, k) => k === "createRadialGradient" ? () => ({ addColorStop() {} }) : k === "arc" ? (...a) => arcs.push(a) : () => {}, set: () => true });
+h = MC.newHero(50, 50, 4); MC.drawHero(cx2, h, 0);
+ok(arcs.some((a) => Math.abs(a[2] - (4 + 2.5) * 1.5) < 1e-9), "hero body is drawn 50% larger (radius " + ((4 + 2.5) * 1.5) + ")");
+ok(h.r === 4 && MC.walkable(f, 50, 50, h.r) && !MC.walkable(f, 103, 50, h.r), "navigation still uses the original radius");
 console.log("core tests passed:", n);

@@ -250,9 +250,10 @@
     return ev;
   };
 
+  MC.HERO_VISUAL_SCALE = 1.5; // drawn size relative to the old look; collision always uses hero.r
   // Draws the hero: a slowly pulsating halo (purely visual) + the round face. Collision only ever uses hero.r.
   MC.drawHero = function (ctx, hero, nowMs) {
-    const R = hero.r + 2.5, t = (nowMs || 0) / 1000, pulse = 0.5 + 0.5 * Math.sin(t * 2.6); // ~2.4 s per breath
+    const R = (hero.r + 2.5) * MC.HERO_VISUAL_SCALE, t = (nowMs || 0) / 1000, pulse = 0.5 + 0.5 * Math.sin(t * 2.6); // ~2.4 s per breath
     const outer = R * (3.4 + 1.1 * pulse);
     const g = ctx.createRadialGradient(hero.x, hero.y, R * 0.8, hero.x, hero.y, outer);
     g.addColorStop(0, "rgba(255,214,64," + (0.55 + 0.25 * pulse).toFixed(3) + ")");
