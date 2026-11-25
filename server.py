@@ -183,8 +183,16 @@ def export(name):
     os.makedirs(out, exist_ok=True)
     shutil.copy(os.path.join(STATIC, "game.html"), os.path.join(out, "index.html"))
     shutil.copy(os.path.join(STATIC, "game-core.js"), os.path.join(out, "game-core.js"))
-    shutil.copy(os.path.join(d, "work.jpg"), os.path.join(out, "work.jpg"))
     shutil.copy(os.path.join(d, "annotations.json"), os.path.join(out, "annotations.json"))
+    game = read_json(os.path.join(d, "game.json"), None)
+    if game is not None:
+        shutil.copy(os.path.join(d, "game.json"), os.path.join(out, "game.json"))
+    elif os.path.exists(os.path.join(out, "game.json")):
+        os.remove(os.path.join(out, "game.json"))
+    im = cv2.imread(os.path.join(d, "work.jpg"))
+    for r in (game or {}).get("title", {}).get("hide", []):  # paint over handwriting in the exported copy only
+        im = detect.hide_marks(im, r)
+    cv2.imwrite(os.path.join(out, "work.jpg"), im, [cv2.IMWRITE_JPEG_QUALITY, 92])
     return out
 
 

@@ -85,3 +85,17 @@ def detect(work, threshold=0.12, minlen=18, simplify=2.0):
         if len(ap) >= 2:
             out.append([[round(float(x), 1), round(float(y), 1)] for x, y in ap])
     return out
+
+
+def hide_marks(im, rect, threshold=0.035, pad=5):
+    """Paint over pencil marks inside rect=[x0,y0,x1,y1] by inpainting from the surrounding paper.
+    Used for the exported game only (the saved work.jpg and the scan are never altered)."""
+    H, W = im.shape[:2]
+    x0, y0, x1, y1 = [int(v) for v in rect]
+    x0, y0, x1, y1 = max(0, x0), max(0, y0), min(W, x1), min(H, y1)
+    m = _line_mask(im, threshold)
+    mask = np.zeros((H, W), np.uint8)
+    mask[y0:y1, x0:x1] = m[y0:y1, x0:x1] * 255
+    mask = cv2.dilate(mask, np.ones((pad * 2 + 1, pad * 2 + 1), np.uint8))
+    mask[:y0, :] = 0; mask[y1:, :] = 0; mask[:, :x0] = 0; mask[:, x1:] = 0
+    return cv2.inpaint(im, mask, 5, cv2.INPAINT_TELEA)

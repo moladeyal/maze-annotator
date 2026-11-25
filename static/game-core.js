@@ -48,6 +48,20 @@
     return [cx / (3 * a), cy / (3 * a)];
   };
 
+  // distance from a point to a region (0 inside)
+  MC.regionDistance = function (r, x, y) {
+    if (r.shape === "ellipse") { const q = Math.hypot((x - r.cx) / r.rx, (y - r.cy) / r.ry); return q <= 1 ? 0 : (q - 1) * Math.min(r.rx, r.ry); }
+    if (inPoly(r.pts, x, y)) return 0;
+    let m = 1e9;
+    for (let i = 0, j = r.pts.length - 1; i < r.pts.length; j = i++) {
+      const ax = r.pts[j][0], ay = r.pts[j][1], dx = r.pts[i][0] - ax, dy = r.pts[i][1] - ay, L2 = dx * dx + dy * dy || 1e-9;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L2)); m = Math.min(m, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+    }
+    return m;
+  };
+  // "touching": inside, or within `tol` px. Walls drawn inside a region can keep the hero's centre out of it.
+  MC.regionTouches = (r, x, y, tol) => MC.regionDistance(r, x, y) <= tol;
+
   MC.findRegion = (regions, name) => regions.find((r) => (r.name || "").trim().toLowerCase() === name.toLowerCase());
 
   /* ---------- collision field ---------- */
@@ -142,12 +156,14 @@
   MC.newHero = (x, y, r) => ({ x, y, r, inactive: new Set() });
 
   // advance the hero by `dist` px along unit vector (vx,vy); axes are tried separately so walls "slide"
-  MC.moveHero = function (f, hero, vx, vy, dist) {
+  // `blocked(x, y)` (optional) adds extra no-go areas on top of the walls, e.g. a locked region
+  MC.moveHero = function (f, hero, vx, vy, dist, blocked) {
     const n = Math.max(1, Math.ceil(dist / 1.0));
     const sx = (vx * dist) / n, sy = (vy * dist) / n;
+    const ok = (x, y) => MC.walkable(f, x, y, hero.r) && !(blocked && blocked(x, y));
     for (let i = 0; i < n; i++) {
-      if (sx && MC.walkable(f, hero.x + sx, hero.y, hero.r)) hero.x += sx;
-      if (sy && MC.walkable(f, hero.x, hero.y + sy, hero.r)) hero.y += sy;
+      if (sx && ok(hero.x + sx, hero.y)) hero.x += sx;
+      if (sy && ok(hero.x, hero.y + sy)) hero.y += sy;
     }
   };
 
@@ -180,6 +196,58 @@
       }
     }
     return null;
+  };
+
+  /* ---------- game rules: start / goal / items / locks ----------
+   * cfg (game.json): { start:"start", goal:"goal",
+   *   items:[{id, region:"goggles"|[aliases], icon, label}],      walk into the region to pick it up
+   *   locks:[{region:"water", needs:"goggles", hint}] }           can't enter the region without the item
+   */
+  const names = (v) => (Array.isArray(v) ? v : [v]).filter(Boolean);
+  const findAny = (regions, v) => { for (const n of names(v)) { const r = MC.findRegion(regions, n); if (r) return r; } return null; };
+
+  MC.createGame = function (ann, cfg, field) {
+    cfg = cfg || {};
+    const regions = ann.regions || [], portals = ann.portals || [], radius = ann.hero_radius || 4;
+    const g = { regions, portals, cfg, field, has: new Set(), won: false, events: [], blockedHint: null };
+    g.items = (cfg.items || []).map((it) => ({ ...it, r: findAny(regions, it.region) }));
+    g.locks = (cfg.locks || []).map((l) => ({ ...l, r: findAny(regions, l.region) })).filter((l) => l.r);
+    g.goal = findAny(regions, cfg.goal || "goal");
+    g.startRegion = findAny(regions, cfg.start || "start");
+    g.touch = radius + 6;
+    g.blocked = (x, y) => g.locks.some((l) => !g.has.has(l.needs) && MC.regionContains(l.r, x, y));
+    const c = g.startRegion ? MC.regionCenter(g.startRegion) : [ann.image.w / 2, ann.image.h / 2];
+    const p = MC.nearestWalkable(field, c[0], c[1], radius, 80);
+    g.hero = MC.newHero(p[0], p[1], radius);
+    for (const q of portals) for (const id of [q.a, q.b]) {
+      const R = regions.find((r) => r.id === id);
+      if (R && MC.regionContains(R, g.hero.x, g.hero.y)) g.hero.inactive.add(id);
+    }
+    return g;
+  };
+
+  // one simulation step: move, then portals, pickups, goal. Returns list of events fired.
+  MC.stepGame = function (g, vx, vy, dist) {
+    const ev = [], h = g.hero;
+    if (g.won) return ev;
+    if (vx || vy) {
+      const x0 = h.x, y0 = h.y;
+      MC.moveHero(g.field, h, vx, vy, dist, g.blocked);
+      // pressing into a locked region (and not moving) -> remember which one, so the UI can explain
+      g.blockedHint = null;
+      if (h.x === x0 && h.y === y0) {
+        const ax = h.x + vx * 3, ay = h.y + vy * 3;
+        const l = g.locks.find((k) => !g.has.has(k.needs) && MC.regionContains(k.r, ax, ay));
+        if (l) { g.blockedHint = l; ev.push({ type: "locked", lock: l }); }
+      }
+    }
+    const hop = MC.updatePortals(g.field, h, g.regions, g.portals);
+    if (hop) ev.push({ type: "portal", ...hop });
+    for (const it of g.items) {
+      if (it.r && !g.has.has(it.id) && MC.regionTouches(it.r, h.x, h.y, g.touch)) { g.has.add(it.id); ev.push({ type: "pickup", item: it }); }
+    }
+    if (g.goal && MC.regionTouches(g.goal, h.x, h.y, g.touch)) { g.won = true; ev.push({ type: "win" }); }
+    return ev;
   };
 
   MC.speedFor = (w, h) => 0.1 * Math.max(w, h); // px/s; scales with image size

@@ -3,61 +3,122 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Maze</title>
 <style>
- html,body{margin:0;height:100%;background:#1c1c1c;color:#eee;font:14px/1.4 sans-serif;overflow:hidden}
- #bar{position:absolute;top:0;left:0;right:0;padding:5px 10px;background:#000a;z-index:2;font-size:13px}
- #stage{position:absolute;inset:28px 0 0 0;display:flex;align-items:center;justify-content:center}
+ html,body{margin:0;height:100%;background:#1c1c1c;color:#eee;font:14px/1.4 system-ui,sans-serif;overflow:hidden}
+ #bar{position:absolute;top:0;left:0;right:0;height:26px;line-height:26px;padding:0 10px;background:#000a;z-index:2;font-size:13px;white-space:nowrap;overflow:hidden}
+ #stage{position:absolute;top:26px;bottom:52px;left:0;right:0;display:flex;align-items:center;justify-content:center}
  canvas{max-width:100%;max-height:100%;touch-action:none}
+ #hud{position:absolute;bottom:0;left:0;right:0;height:52px;background:#111;border-top:1px solid #333;display:flex;align-items:center;gap:10px;padding:0 12px}
+ #hud .lbl{color:#888;font-size:12px}
+ .slot{position:relative;width:38px;height:38px;border-radius:8px;border:2px dashed #444;display:flex;align-items:center;justify-content:center}
+ .slot.full{border:2px solid #4ac;background:#123}
+ .slot svg{width:28px;height:28px;display:none}.slot.full svg{display:block}
+ .slot.full:hover::after,.slot.full:focus::after{content:attr(data-tip);position:absolute;bottom:46px;left:0;background:#000;color:#fff;border:1px solid #4ac;border-radius:6px;padding:4px 10px;white-space:nowrap;direction:rtl;font-size:15px;z-index:5}
+ .slot.pop{animation:pop .6s}
+ @keyframes pop{0%{transform:scale(.3)}60%{transform:scale(1.35)}100%{transform:scale(1)}}
+ #toast{position:absolute;left:62px;bottom:60px;background:#000d;border:1px solid #888;border-radius:8px;padding:5px 12px;direction:rtl;opacity:0;transition:opacity .25s;pointer-events:none;z-index:4}
+ #toast.on{opacity:1}
  kbd{background:#444;border-radius:3px;padding:0 5px}
 </style></head><body>
-<div id="bar">arrows / WASD / numpad (diagonals ok) &middot; or hold the mouse/finger to walk toward it &middot; <kbd>L</kbd> lines <kbd>G</kbd> regions <kbd>R</kbd> restart <span id="info"></span></div>
+<div id="bar">arrows / WASD / numpad (diagonals ok) &middot; or hold the mouse/finger to walk toward it &middot; <kbd>R</kbd> restart</div>
 <div id="stage"><canvas id="c"></canvas></div>
+<div id="toast"></div>
+<div id="hud"><span class="lbl">items</span><span id="slots"></span></div>
 <script src="game-core.js"></script>
 <script>
 (async () => {
   const MC = window.MazeCore;
   const ann = await (await fetch('annotations.json')).json();
+  const cfg = await fetch('game.json').then(r => r.ok ? r.json() : {}).catch(() => ({}));
   const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = ann.image.file || 'work.jpg'; });
   const W = ann.image.w, H = ann.image.h;
   const cv = document.getElementById('c'), ctx = cv.getContext('2d'); cv.width = W; cv.height = H;
-  const field = MC.buildField(ann.lines, W, H);
-  const radius = ann.hero_radius || 4, speed = MC.speedFor(W, H);
-  const regions = ann.regions || [], portals = ann.portals || [];
-  let hero, showLines = false, showRegions = false;
-  function reset() {
-    const st = MC.findRegion(regions, 'start');
-    const c = st ? MC.regionCenter(st) : [W / 2, H / 2];
-    const p = MC.nearestWalkable(field, c[0], c[1], radius, 80);
-    hero = MC.newHero(p[0], p[1], radius);
-    for (const q of portals) for (const id of [q.a, q.b]) { const R = regions.find(r => r.id === id); if (R && MC.regionContains(R, hero.x, hero.y)) hero.inactive.add(id); }
+  const field = MC.buildField(ann.lines, W, H), speed = MC.speedFor(W, H);
+  let G = MC.createGame(ann, cfg, field);
+
+  /* ---------- HUD: one slot per item, filled when picked up ---------- */
+  const GOGGLES = '<svg viewBox="0 0 32 32"><path d="M1 13 Q16 8 31 13" stroke="#fc3" stroke-width="3" fill="none"/><circle cx="9" cy="19" r="7" fill="#8df" stroke="#fc3" stroke-width="3"/><circle cx="23" cy="19" r="7" fill="#8df" stroke="#fc3" stroke-width="3"/><path d="M16 19h0" stroke="#fc3" stroke-width="3"/><path d="M6 17q2-2 4-1M20 17q2-2 4-1" stroke="#fff" stroke-width="1.5" fill="none"/></svg>';
+  const ICONS = { goggles: GOGGLES };
+  const slotsEl = document.getElementById('slots'); slotsEl.style.display = 'flex'; slotsEl.style.gap = '8px';
+  function buildSlots() {
+    slotsEl.innerHTML = '';
+    for (const it of G.items) {
+      const d = document.createElement('div'); d.className = 'slot'; d.dataset.id = it.id; d.dataset.tip = it.label || it.id; d.tabIndex = 0;
+      d.innerHTML = ICONS[it.icon || it.id] || '<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#fc3"/></svg>';
+      slotsEl.appendChild(d);
+    }
   }
-  reset();
+  buildSlots();
+  const toast = document.getElementById('toast'); let toastT;
+  const say = t => { toast.textContent = t; toast.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('on'), 2200); };
+
+  /* ---------- win animation ---------- */
+  let confetti = [], winT = 0;
+  function startWin() {
+    winT = performance.now(); const c = MC.regionCenter(G.goal);
+    for (let i = 0; i < 220; i++) { const a = Math.random() * 6.283, v = 90 + Math.random() * 380;
+      confetti.push({ x: c[0], y: c[1], vx: Math.cos(a) * v, vy: Math.sin(a) * v - 220, rot: Math.random() * 6, vr: (Math.random() - .5) * 12, s: 5 + Math.random() * 8, col: `hsl(${Math.random() * 360},90%,58%)` }); }
+  }
+  function drawWin(now, dt) {
+    const t = (now - winT) / 1000;
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(.45, t * .5)})`; ctx.fillRect(0, 0, W, H);
+    for (const p of confetti) { p.vy += 520 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .995; p.rot += p.vr * dt;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; ctx.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * .66); ctx.restore(); }
+    if (t < 6 && t > 1.2 && Math.random() < .05) { const c = [Math.random() * W, Math.random() * H * .5]; for (let i = 0; i < 40; i++) { const a = Math.random() * 6.283, v = 60 + Math.random() * 220; confetti.push({ x: c[0], y: c[1], vx: Math.cos(a) * v, vy: Math.sin(a) * v, rot: 0, vr: 6, s: 4 + Math.random() * 6, col: `hsl(${Math.random() * 360},95%,60%)` }); } }
+    confetti = confetti.filter(p => p.y < H + 40);
+    const sc = Math.min(1, t * 2.2), bounce = 1 + .06 * Math.sin(t * 6), size = Math.round(H * .13 * (sc < 1 ? sc * 1.15 : bounce));
+    ctx.save(); ctx.translate(W / 2, H * .42); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'rtl';
+    ctx.font = `bold ${size}px system-ui, sans-serif`; ctx.lineWidth = size * .12; ctx.strokeStyle = '#000'; ctx.fillStyle = '#ffd23f';
+    ctx.strokeText('ניצחת!', 0, 0); ctx.fillText('ניצחת!', 0, 0);
+    ctx.font = `${Math.round(H * .035)}px system-ui, sans-serif`; ctx.lineWidth = 4; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000';
+    ctx.strokeText('R / לחצו כאן לשחק שוב', 0, size * .9); ctx.fillText('R / לחצו כאן לשחק שוב', 0, size * .9);
+    ctx.restore();
+  }
+
+  /* ---------- drawing ---------- */
+  const rpath = r => { ctx.beginPath(); if (r.shape === 'ellipse') ctx.ellipse(r.cx, r.cy, r.rx, r.ry, 0, 0, 7); else { ctx.moveTo(r.pts[0][0], r.pts[0][1]); r.pts.forEach(p => ctx.lineTo(p[0], p[1])); ctx.closePath(); } };
+  function drawTitle() {
+    const t = cfg.title; if (!t) return; const [x, y, w, h] = t.box;
+    ctx.save(); ctx.fillStyle = '#fbfaf5'; ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'rtl';
+    let size = Math.round(h * .7); ctx.font = `bold ${size}px system-ui, sans-serif`;
+    while (ctx.measureText(t.text).width > w * .9 && size > 8) { size -= 2; ctx.font = `bold ${size}px system-ui, sans-serif`; }
+    ctx.fillText(t.text, x + w / 2, y + h / 2 + size * .05); ctx.restore();
+  }
+  function draw(now, dt) {
+    ctx.drawImage(img, 0, 0);
+    for (const tnt of cfg.tint || []) { const r = MC.findRegion(G.regions, tnt.region); if (!r) continue; ctx.save(); rpath(r); ctx.fillStyle = tnt.color || 'rgba(90,180,255,.4)'; ctx.fill(); ctx.restore(); }
+    drawTitle();
+    const hero = G.hero, R = hero.r + 2.5;
+    ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(hero.x, hero.y, R, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(hero.x - R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.arc(hero.x + R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.fill();
+    if (G.won) drawWin(now, dt);
+  }
+
+  /* ---------- input + loop ---------- */
   const keys = new Set(); let pointer = null;
+  function restart() { G = MC.createGame(ann, cfg, field); confetti = []; buildSlots(); say(''); toast.classList.remove('on'); }
   addEventListener('keydown', e => {
     if (e.code.startsWith('Arrow') || e.code.startsWith('Numpad') || ['Home','End','PageUp','PageDown','Space'].includes(e.code)) e.preventDefault();
-    keys.add(e.code);
-    if (e.code === 'KeyL') showLines = !showLines; else if (e.code === 'KeyG') showRegions = !showRegions; else if (e.code === 'KeyR') reset();
+    keys.add(e.code); if (e.code === 'KeyR') restart();
   });
-  addEventListener('keyup', e => keys.delete(e.code));
-  addEventListener('blur', () => keys.clear());
+  addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
   const toImg = e => { const b = cv.getBoundingClientRect(); return { x: (e.clientX - b.left) * W / b.width, y: (e.clientY - b.top) * H / b.height }; };
-  cv.addEventListener('pointerdown', e => { pointer = toImg(e); cv.setPointerCapture(e.pointerId); });
+  cv.addEventListener('pointerdown', e => { if (G.won && performance.now() - winT > 800) { restart(); return; } pointer = toImg(e); cv.setPointerCapture(e.pointerId); });
   cv.addEventListener('pointermove', e => { if (pointer) pointer = toImg(e); });
-  cv.addEventListener('pointerup', () => pointer = null);
-  cv.addEventListener('pointercancel', () => pointer = null);
-  let last = performance.now();
+  cv.addEventListener('pointerup', () => pointer = null); cv.addEventListener('pointercancel', () => pointer = null);
+  let last = performance.now(), lastLock = 0;
+  window.__game = () => G; // for tests
   (function loop(now) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    let v = MC.keyVector(keys); if (!v[0] && !v[1]) v = MC.pointerVector(hero, pointer);
-    if (v[0] || v[1]) MC.moveHero(field, hero, v[0], v[1], speed * dt);
-    MC.updatePortals(field, hero, regions, portals);
-    ctx.drawImage(img, 0, 0);
-    if (showLines) { ctx.strokeStyle = '#1d4fd8'; ctx.lineWidth = 2; ctx.beginPath(); for (const l of ann.lines) { ctx.moveTo(l.pts[0][0], l.pts[0][1]); for (const p of l.pts) ctx.lineTo(p[0], p[1]); } ctx.stroke(); }
-    if (showRegions) { ctx.strokeStyle = '#d81b60'; ctx.lineWidth = 2; for (const r of regions) { ctx.beginPath(); if (r.shape === 'ellipse') ctx.ellipse(r.cx, r.cy, r.rx, r.ry, 0, 0, 7); else { ctx.moveTo(r.pts[0][0], r.pts[0][1]); r.pts.forEach(p => ctx.lineTo(p[0], p[1])); ctx.closePath(); } ctx.stroke(); } }
-    const R = radius + 2.5;
-    ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.arc(hero.x, hero.y, R, 0, 7); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(hero.x - R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.arc(hero.x + R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.fill();
-    requestAnimationFrame(loop);
+    let v = MC.keyVector(keys); if (!v[0] && !v[1]) v = MC.pointerVector(G.hero, pointer);
+    const ev = MC.stepGame(G, v[0], v[1], speed * dt);
+    for (const e of ev) {
+      if (e.type === 'pickup') { const s = slotsEl.querySelector(`[data-id="${e.item.id}"]`); if (s) { s.classList.add('full', 'pop'); setTimeout(() => s.classList.remove('pop'), 700); } say(e.item.label || e.item.id); }
+      else if (e.type === 'locked' && now - lastLock > 2500) { lastLock = now; say(e.lock.hint || 'locked'); }
+      else if (e.type === 'win') startWin();
+    }
+    draw(now, dt); requestAnimationFrame(loop);
   })(last);
 })();
 </script></body></html>

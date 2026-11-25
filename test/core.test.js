@@ -77,4 +77,36 @@ ok(MC.walkable(f, h.x, h.y, 4), "landing point on a wall is nudged to open floor
 h = MC.newHero(20, 80, 4); MC.moveHero(f, h, 1, 0, 60);
 ok(h.x > 70, "regions never block movement (no portals here)");
 
+// blocked predicate
+h = MC.newHero(50, 50, 4); MC.moveHero(f, h, 1, 0, 30, (x) => x > 70);
+ok(h.x <= 70 && h.x > 60, "extra blocked area stops the hero, x=" + h.x);
+
+// rules: start / goal / item / lock
+const ann = { image: { w: 200, h: 110 }, hero_radius: 4, portals: [], regions: [
+  { id: "s", name: "start", shape: "polygon", pts: [[20, 40], [30, 40], [30, 60], [20, 60]] },
+  { id: "g", name: "goggles", shape: "polygon", pts: [[60, 85], [70, 85], [70, 98], [60, 98]] },
+  { id: "w", name: "water", shape: "polygon", pts: [[120, 10], [190, 10], [190, 100], [120, 100]] },
+  { id: "z", name: "goal", shape: "polygon", pts: [[170, 40], [185, 40], [185, 60], [170, 60]] }] };
+const cfg = { items: [{ id: "goggles", region: ["googles", "goggles"], label: "x" }], locks: [{ region: "water", needs: "goggles" }] };
+// open a door in the middle wall so the two rooms connect
+const door = MC.buildField([box(5, 5, 195, 105), { pts: [[100, 5], [100, 40]] }, { pts: [[100, 70], [100, 105]] }], 200, 110);
+let g = MC.createGame(ann, cfg, door);
+ok(Math.abs(g.hero.x - 25) < 3, "hero starts in the 'start' region");
+const walk = (dx, dy, d) => { let evs = []; for (let i = 0; i < d; i++) evs = evs.concat(MC.stepGame(g, dx, dy, 1)); return evs; };
+let evs = walk(1, 0, 110); // heads right: through the door, but the water (x>=120) is locked
+ok(g.hero.x > 100 && g.hero.x < 121, "locked water stops the hero at its edge, x=" + g.hero.x);
+ok(evs.some((e) => e.type === "locked"), "a 'locked' event is reported while pushing against it");
+ok(!g.has.has("goggles") && !g.won, "nothing picked up yet and no win");
+g = MC.createGame(ann, cfg, door);
+walk(1, 0, 40); walk(0, 1, 50); // detour down to the goggles (alias 'googles' in the config resolves to region 'goggles')
+ok(g.has.has("goggles"), "walking into the goggles region picks them up (region alias works)");
+walk(0, -1, 40); evs = walk(1, 0, 170);
+ok(g.hero.x > 140, "with the goggles the hero can enter the water, x=" + g.hero.x);
+ok(g.won, "reaching the goal region wins");
+ok(MC.stepGame(g, -1, 0, 5).length === 0 && g.hero.x > 140, "game is frozen after a win");
+
+// touching: a wall inside the region keeps the centre out, but touching it counts for items and goal
+const ring = { id: "k", name: "ring", shape: "polygon", pts: [[140, 20], [160, 20], [160, 40], [140, 40]] };
+ok(MC.regionTouches(ring, 138, 30, 5) && !MC.regionTouches(ring, 130, 30, 5), "regionTouches: within tolerance counts, farther does not");
+ok(MC.regionDistance(ring, 150, 30) === 0 && Math.abs(MC.regionDistance(ring, 135, 30) - 5) < 1e-9, "regionDistance");
 console.log("core tests passed:", n);

@@ -54,6 +54,23 @@ Movement: arrows, WASD or the numpad (two keys = diagonal), or hold the mouse/fi
 
 **Export** writes a static folder `dist/<name>/` (`index.html`, `game-core.js`, `work.jpg`, `annotations.json`) that any static host can serve.
 
+## Game rules (`projects/<name>/game.json`, optional)
+
+Rules live next to the annotations (not inside them) and are exported with the game. Regions are referenced by name.
+
+```jsonc
+{
+  "title":  { "text": "מבוך זאב", "box": [x, y, w, h], "hide": [[x0, y0, x1, y1]] },  // text box; `hide` paints over handwriting in the exported image only
+  "start": "start", "goal": "goal",                                                      // reaching the goal region plays the win animation
+  "items": [ { "id": "goggles", "region": ["goggles"], "icon": "goggles", "label": "המשקפת אצלך" } ],  // walk into the region to pick up; shown in the item bar with a hover label
+  "locks": [ { "region": "water", "needs": "goggles", "hint": "…" } ],                  // can't enter the region without the item
+  "tint":  [ { "region": "water", "color": "rgba(90,185,255,0.42)" } ]
+}
+```
+
+Items and the goal trigger when the hero *touches* the region (a few px tolerance), because pencil lines inside a region can keep the hero's centre out of it.
+`node test/reach.js games/maze1` checks the goal is reachable (and `NOKEYS=1` that it is not reachable without the items).
+
 ## Data (`projects/<name>/annotations.json`)
 
 ```jsonc

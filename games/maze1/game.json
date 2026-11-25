@@ -1,0 +1,8 @@
+{
+  "title": { "text": "מבוך זאב", "box": [1262, 8, 505, 84], "hide": [[1255, 4, 1772, 98], [1345, 98, 1772, 215]] },
+  "start": "start",
+  "goal": "goal",
+  "items": [ { "id": "goggles", "region": ["goggles", "googles"], "icon": "goggles", "label": "המשקפת אצלך" } ],
+  "locks": [ { "region": "water", "needs": "goggles", "hint": "צריך משקפת כדי להיכנס למים" } ],
+  "tint": [ { "region": "water", "color": "rgba(90,185,255,0.42)" } ]
+}
