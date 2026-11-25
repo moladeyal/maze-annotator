@@ -250,6 +250,36 @@
     return ev;
   };
 
+  // Draws the hero: a slowly pulsating halo (purely visual) + the round face. Collision only ever uses hero.r.
+  MC.drawHero = function (ctx, hero, nowMs) {
+    const R = hero.r + 2.5, t = (nowMs || 0) / 1000, pulse = 0.5 + 0.5 * Math.sin(t * 2.6); // ~2.4 s per breath
+    const outer = R * (3.4 + 1.1 * pulse);
+    const g = ctx.createRadialGradient(hero.x, hero.y, R * 0.8, hero.x, hero.y, outer);
+    g.addColorStop(0, "rgba(255,214,64," + (0.55 + 0.25 * pulse).toFixed(3) + ")");
+    g.addColorStop(0.55, "rgba(255,190,40," + (0.22 + 0.12 * pulse).toFixed(3) + ")");
+    g.addColorStop(1, "rgba(255,190,40,0)");
+    ctx.save();
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hero.x, hero.y, outer, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,140,0," + (0.35 + 0.35 * pulse).toFixed(3) + ")"; ctx.lineWidth = Math.max(1, R * 0.28);
+    ctx.beginPath(); ctx.arc(hero.x, hero.y, R * (1.9 + 0.5 * pulse), 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#ffd23f"; ctx.strokeStyle = "#222"; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(hero.x, hero.y, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#222"; ctx.beginPath();
+    ctx.arc(hero.x - R * 0.35, hero.y - R * 0.2, R * 0.14, 0, Math.PI * 2); ctx.arc(hero.x + R * 0.35, hero.y - R * 0.2, R * 0.14, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  };
+
+  // portals the player should see as a dashed line (portal.dashed), as [{x1,y1,x2,y2,dir}]
+  MC.visiblePortalLines = function (regions, portals) {
+    const byId = {}; regions.forEach((r) => (byId[r.id] = r)); const out = [];
+    for (const p of portals) {
+      if (!p.dashed || !byId[p.a] || !byId[p.b]) continue;
+      const a = MC.regionCenter(byId[p.a]), b = MC.regionCenter(byId[p.b]);
+      out.push({ id: p.id, x1: a[0], y1: a[1], x2: b[0], y2: b[1], dir: p.dir || "both" });
+    }
+    return out;
+  };
+
   MC.speedFor = (w, h) => 0.1 * Math.max(w, h); // px/s; scales with image size
 
   if (typeof module !== "undefined" && module.exports) module.exports = MC; else root.MazeCore = MC;

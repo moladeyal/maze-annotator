@@ -162,6 +162,9 @@ try:
         pg.click("[data-dir]"); check(S("S.ann.portals[0].dir") == "ab", "portal direction toggles to a->b")
         pg.click("[data-dir]"); pg.click("[data-dir]"); check(S("S.ann.portals[0].dir") == "both", "...and cycles back to both")
 
+        pg.click("[data-dash]"); check(S("S.ann.portals[0].dashed") is True, "the dashed-line toggle on a portal turns on")
+        pg.click("[data-dash]"); check(S("S.ann.portals[0].dashed") is None, "...and off again (flag removed)")
+        pg.click("[data-dash]")
         # ---- layers
         pg.uncheck("[data-l=auto]"); check(S("S.layers.auto") is False, "layer toggle works")
         pg.check("[data-l=auto]")

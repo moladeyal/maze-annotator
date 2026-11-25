@@ -17,6 +17,15 @@ try:
         pg.screenshot(path=shots + "/game_start.png")
         s = G("[g.hero.x, g.hero.y]"); check(abs(s[0] - 125) < 40 and abs(s[1] - 88) < 40, "hero starts in the 'start' region at the top left %s" % [round(v) for v in s])
         check(G("g.has.size") == 0 and pg.locator(".slot.full").count() == 0, "inventory slot is empty at the start")
+        n_dash = G("g.portals.filter(p => p.dashed).length"); check(n_dash == 3, "exactly the 3 tunnel portals are flagged dashed (found %d)" % n_dash)
+        # halo: sample a ring well outside the hero's body (3 body radii) at two moments; it must be coloured and must change as it pulses
+        def ring():
+            return pg.evaluate("""() => { const g = window.__game(), c = document.getElementById('c'), x = c.getContext('2d'); const R = (g.hero.r + 2.5) * 2.6; let s = 0;
+              for (let a = 0; a < 6.28; a += .5) { const d = x.getImageData(Math.round(g.hero.x + R * Math.cos(a)), Math.round(g.hero.y + R * Math.sin(a)), 1, 1).data; s += d[0] - d[2]; } return s; }""")
+        vals = []
+        for _ in range(8): vals.append(ring()); time.sleep(0.3)
+        check(max(vals) - min(vals) > 15, "the halo around the hero is visible and pulsates (ring sample varies %s)" % [round(v) for v in vals])
+        check(G("g.hero.r") == 4, "hero collision radius is still 4 (halo is visual only)")
         # --- lock: no goggles -> water entrance blocks
         pg.evaluate("() => { const g = window.__game(); g.hero.x = 707; g.hero.y = 592; }")
         pg.keyboard.down("ArrowRight"); time.sleep(1.6); pg.keyboard.up("ArrowRight")

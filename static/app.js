@@ -328,7 +328,7 @@
     if (L.portals) for (const p of A.portals) {
       const a = A.regions.find((r) => r.id === p.a), b = A.regions.find((r) => r.id === p.b); if (!a || !b) continue;
       const ca = MC.regionCenter(a), cb = MC.regionCenter(b), sel = S.sel && S.sel.type === 'portal' && S.sel.id === p.id;
-      ctx.strokeStyle = ctx.fillStyle = sel ? '#fff' : '#ff4fd8'; ctx.lineWidth = (sel ? 3 : 2) * px; ctx.setLineDash([7 * px, 5 * px]);
+      ctx.strokeStyle = ctx.fillStyle = sel ? '#fff' : p.dashed ? '#ffb300' : '#ff4fd8'; ctx.lineWidth = (sel ? 3 : 2) * px; ctx.setLineDash([7 * px, 5 * px]);
       ctx.beginPath(); ctx.moveTo(ca[0], ca[1]); ctx.lineTo(cb[0], cb[1]); ctx.stroke(); ctx.setLineDash([]);
       const ang = Math.atan2(cb[1] - ca[1], cb[0] - ca[0]), d = p.dir || 'both', s = 12 * px;
       if (d !== 'ba') arrow(cb[0] - Math.cos(ang) * 4 * px, cb[1] - Math.sin(ang) * 4 * px, ang, s);
@@ -345,9 +345,7 @@
     }
     if (S.tool === 'eraser' && S.mouse && !S.play) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 * px; ctx.beginPath(); ctx.arc(S.mouse.x, S.mouse.y, S.opts.eraser, 0, 7); ctx.stroke(); }
     if (S.play) {
-      const hero = S.play.hero, R = hero.r + 2.5;
-      ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(hero.x, hero.y, R, 0, 7); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(hero.x - R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.arc(hero.x + R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.fill();
+      MC.drawHero(ctx, S.play.hero, performance.now());
     }
   }
 
@@ -422,7 +420,7 @@
       : `<h4>Select</h4><p class="hint">Click a region to select, drag to move, <kbd>Del</kbd> deletes. Drag empty space (or hold space) to pan; scroll to zoom.</p>`;
     el.innerHTML = `${opt}
       <h4>Regions</h4>${A.regions.length ? A.regions.map((r) => `<div class="item ${S.sel && S.sel.type === 'region' && S.sel.id === r.id ? 'sel' : ''}" data-r="${r.id}"><span class="dot" style="background:hsl(${hue(r.name)},80%,55%)"></span><span class="nm">${r.name.replace(/</g, '&lt;')}</span><button data-ren="${r.id}" title="Rename">✎</button><button data-del="${r.id}" title="Delete">✕</button></div>`).join('') : '<p class="hint">none yet</p>'}
-      <h4>Portals</h4>${A.portals.length ? A.portals.map((p) => `<div class="item ${S.sel && S.sel.type === 'portal' && S.sel.id === p.id ? 'sel' : ''}" data-p="${p.id}"><span class="nm">${nameOf(p.a).replace(/</g, '&lt;')}</span><button data-dir="${p.id}" title="Click to change direction">${{ both: '↔', ab: '→', ba: '←' }[p.dir || 'both']}</button><span class="nm">${nameOf(p.b).replace(/</g, '&lt;')}</span><button data-pdel="${p.id}" title="Delete">✕</button></div>`).join('') : '<p class="hint">none yet</p>'}
+      <h4>Portals</h4>${A.portals.length ? '<p class="hint">┄ = show the connecting line to the player (dashed)</p>' : ''}${A.portals.length ? A.portals.map((p) => `<div class="item ${S.sel && S.sel.type === 'portal' && S.sel.id === p.id ? 'sel' : ''}" data-p="${p.id}"><span class="nm">${nameOf(p.a).replace(/</g, '&lt;')}</span><button data-dash="${p.id}" class="${p.dashed ? 'on' : ''}" title="Show this portal's connecting line to the player as a dashed line">┄</button><button data-dir="${p.id}" title="Click to change direction">${{ both: '↔', ab: '→', ba: '←' }[p.dir || 'both']}</button><span class="nm">${nameOf(p.b).replace(/</g, '&lt;')}</span><button data-pdel="${p.id}" title="Delete">✕</button></div>`).join('') : '<p class="hint">none yet</p>'}
       <h4>Layers</h4>${['scan', 'auto', 'drawn', 'regions', 'portals'].map((l) => `<div class="row"><label style="flex:1"><input type="checkbox" data-l="${l}" ${S.layers[l] ? 'checked' : ''}> ${{ scan: 'Drawing (scan)', auto: 'Detected lines', drawn: 'Drawn lines', regions: 'Regions', portals: 'Portals' }[l]}</label></div>`).join('')}
       <h4>Playtest</h4>${slider('h_r', 'Hero size', 1, 14, 0.5, S.project.hero_radius || 4)}
       <p class="hint">Small by default. Press <kbd>P</kbd> to walk around; the hero starts in a region named “start” (or at your mouse).</p>
@@ -436,6 +434,7 @@
     el.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => { S.sel = { type: 'region', id: b.dataset.del }; deleteSelected(); }));
     el.querySelectorAll('[data-p]').forEach((b) => (b.onclick = (e) => { if (e.target.tagName === 'BUTTON') return; S.sel = { type: 'portal', id: b.dataset.p }; buildPanel(); render(); }));
     el.querySelectorAll('[data-dir]').forEach((b) => (b.onclick = () => { const p = A.portals.find((x) => x.id === b.dataset.dir); snap(); p.dir = { both: 'ab', ab: 'ba', ba: 'both' }[p.dir || 'both']; markDirty(); buildPanel(); render(); }));
+    el.querySelectorAll('[data-dash]').forEach((b) => (b.onclick = () => { const p = A.portals.find((x) => x.id === b.dataset.dash); snap(); if (p.dashed) delete p.dashed; else p.dashed = true; markDirty(); buildPanel(); render(); }));
     el.querySelectorAll('[data-pdel]').forEach((b) => (b.onclick = () => { S.sel = { type: 'portal', id: b.dataset.pdel }; deleteSelected(); }));
     el.querySelectorAll('[data-l]').forEach((b) => (b.onchange = () => { S.layers[b.dataset.l] = b.checked; render(); }));
     $('#h_r').oninput = (e) => { S.project.hero_radius = +e.target.value; $('#h_rv').textContent = e.target.value; if (S.play) S.play.hero.r = +e.target.value; clearTimeout(S.heroT); S.heroT = setTimeout(() => api(`/api/project/${S.name}/project`, { hero_radius: S.project.hero_radius }), 500); };

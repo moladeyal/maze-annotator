@@ -40,7 +40,7 @@ Click **Accept lines & annotate**. (You can come back and re-detect; auto-detect
 | Eraser (E) | circle eraser; drag over lines to cut them. `[` `]` change size |
 | Line (D) | draw an extra wall, freehand or straight (click points, double-click/Enter to finish) |
 | Region (R) | polygon or ellipse, then give it a name (`start`, `finish`, `water`, …). Regions **never block** the hero |
-| Portal (T) | click one region, then another. The list on the right toggles the direction `↔ → ←` |
+| Portal (T) | click one region, then another. The list on the right toggles the direction `↔ → ←`, and `┄` shows the portal's connecting line to the player as a dashed line in the game (drawn orange in the editor) |
 | Undo / Redo | Ctrl+Z, Ctrl+Shift+Z |
 | Play (P) | playtest in place (hero starts in the region named `start`, or at your mouse) |
 
@@ -81,7 +81,7 @@ Items and the goal trigger when the hero *touches* the region (a few px toleranc
   "lines":   [ { "id": "a1", "src": "auto" | "drawn", "pts": [[x,y], …] } ],   // these block the hero
   "regions": [ { "id": "r1", "name": "start", "shape": "polygon", "pts": [[x,y], …], "props": {} },
                { "id": "r2", "name": "water", "shape": "ellipse", "cx":…, "cy":…, "rx":…, "ry":… } ],
-  "portals": [ { "id": "p1", "a": "r1", "b": "r2", "dir": "both" | "ab" | "ba" } ]
+  "portals": [ { "id": "p1", "a": "r1", "b": "r2", "dir": "both" | "ab" | "ba", "dashed": true /* optional: draw the line in the game */ } ]
 }
 ```
 

@@ -76,6 +76,23 @@
 
   /* ---------- drawing ---------- */
   const rpath = r => { ctx.beginPath(); if (r.shape === 'ellipse') ctx.ellipse(r.cx, r.cy, r.rx, r.ry, 0, 0, 7); else { ctx.moveTo(r.pts[0][0], r.pts[0][1]); r.pts.forEach(p => ctx.lineTo(p[0], p[1])); ctx.closePath(); } };
+  // portals flagged "dashed" in the editor are shown to the player as a dashed line (marching slowly)
+  function drawPortalLines(now) {
+    const lines = MC.visiblePortalLines(G.regions, G.portals); if (!lines.length) return;
+    const wdt = Math.max(2.5, W / 450);
+    ctx.save(); ctx.lineCap = 'round'; ctx.setLineDash([wdt * 3.2, wdt * 2.6]); ctx.lineDashOffset = -(now / 90) % (wdt * 5.8);
+    for (const l of lines) {
+      ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = wdt * 2.2; ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
+      ctx.strokeStyle = '#7b1fa2'; ctx.lineWidth = wdt; ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    for (const l of lines) { // arrowheads only for one-way portals
+      const ang = Math.atan2(l.y2 - l.y1, l.x2 - l.x1), s = wdt * 5;
+      const head = (x, y, a) => { ctx.fillStyle = '#7b1fa2'; ctx.strokeStyle = '#fff'; ctx.lineWidth = wdt * .7; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s * Math.cos(a - .45), y - s * Math.sin(a - .45)); ctx.lineTo(x - s * Math.cos(a + .45), y - s * Math.sin(a + .45)); ctx.closePath(); ctx.stroke(); ctx.fill(); };
+      if (l.dir === 'ab') head(l.x2, l.y2, ang); else if (l.dir === 'ba') head(l.x1, l.y1, ang + Math.PI);
+    }
+    ctx.restore();
+  }
   function drawTitle() {
     const t = cfg.title; if (!t) return; const [x, y, w, h] = t.box;
     ctx.save(); ctx.fillStyle = '#fbfaf5'; ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 3;
@@ -88,10 +105,9 @@
   function draw(now, dt) {
     ctx.drawImage(img, 0, 0);
     for (const tnt of cfg.tint || []) { const r = MC.findRegion(G.regions, tnt.region); if (!r) continue; ctx.save(); rpath(r); ctx.fillStyle = tnt.color || 'rgba(90,180,255,.4)'; ctx.fill(); ctx.restore(); }
+    drawPortalLines(now);
     drawTitle();
-    const hero = G.hero, R = hero.r + 2.5;
-    ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(hero.x, hero.y, R, 0, 7); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(hero.x - R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.arc(hero.x + R * .35, hero.y - R * .2, R * .14, 0, 7); ctx.fill();
+    MC.drawHero(ctx, G.hero, now);
     if (G.won) drawWin(now, dt);
   }
 

@@ -109,4 +109,15 @@ ok(MC.stepGame(g, -1, 0, 5).length === 0 && g.hero.x > 140, "game is frozen afte
 const ring = { id: "k", name: "ring", shape: "polygon", pts: [[140, 20], [160, 20], [160, 40], [140, 40]] };
 ok(MC.regionTouches(ring, 138, 30, 5) && !MC.regionTouches(ring, 130, 30, 5), "regionTouches: within tolerance counts, farther does not");
 ok(MC.regionDistance(ring, 150, 30) === 0 && Math.abs(MC.regionDistance(ring, 135, 30) - 5) < 1e-9, "regionDistance");
+// halo: purely visual. drawHero must never alter hero.r, and the drawn halo is much bigger than the body
+const calls = []; const gstub = { addColorStop() {} };
+const cx = new Proxy({}, { get: (_, k) => k === "createRadialGradient" ? (...a) => (calls.push(a), gstub) : k === "arc" ? (...a) => calls.push(["arc", ...a]) : () => {}, set: () => true });
+h = MC.newHero(50, 50, 4); const r0 = h.r; MC.drawHero(cx, h, 0); MC.drawHero(cx, h, 1300);
+ok(h.r === r0, "drawing the halo does not change the hero's collision radius");
+const outers = calls.filter((c) => c[0] !== "arc").map((c) => c[5]);
+ok(outers.length === 2 && outers.every((o) => o > 3 * (r0 + 2.5)) && outers[0] !== outers[1], "halo is several times larger than the body and pulsates over time");
+// dashed portals
+const rr = [{ id: "a", shape: "polygon", pts: [[0, 0], [2, 0], [2, 2], [0, 2]] }, { id: "b", shape: "polygon", pts: [[10, 0], [12, 0], [12, 2], [10, 2]] }];
+const vl = MC.visiblePortalLines(rr, [{ id: "p1", a: "a", b: "b", dir: "both", dashed: true }, { id: "p2", a: "a", b: "b", dir: "ab" }]);
+ok(vl.length === 1 && vl[0].id === "p1" && Math.abs(vl[0].x2 - vl[0].x1 - 10) < 1e-9, "only portals flagged dashed produce a visible line");
 console.log("core tests passed:", n);
