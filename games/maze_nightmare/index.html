@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="he"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Maze</title>
+<style>
+ html,body{margin:0;height:100%;background:#1c1c1c;color:#eee;font:14px/1.4 system-ui,sans-serif;overflow:hidden}
+ #bar{position:absolute;bottom:0;left:64px;right:0;height:26px;line-height:26px;padding:0 10px;background:rgba(0,0,0,.4);pointer-events:none;z-index:2;font-size:13px;white-space:nowrap;overflow:hidden}
+ #stage{position:absolute;top:0;bottom:0;left:64px;right:0;display:flex;align-items:center;justify-content:center}
+ canvas{max-width:100%;max-height:100%;touch-action:none}
+ #hud{position:absolute;top:0;bottom:0;left:0;width:64px;background:#111;border-right:1px solid #333;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px 0}
+ #hud .lbl{color:#888;font-size:12px}
+ .slot{position:relative;width:38px;height:38px;border-radius:8px;border:2px dashed #444;display:flex;align-items:center;justify-content:center}
+ .slot.full{border:2px solid #4ac;background:#123}
+ .slot svg{width:28px;height:28px;display:none}.slot.full svg{display:block}
+ .slot.full:hover::after,.slot.full:focus::after,.slot.broken:hover::after{content:attr(data-tip);position:absolute;left:48px;top:50%;transform:translateY(-50%);background:#000;color:#fff;border:1px solid #4ac;border-radius:6px;padding:4px 10px;white-space:nowrap;direction:rtl;font-size:15px;z-index:5}
+ .slot.pop{animation:pop .6s}
+ .slot.hit{animation:hit .45s}
+ @keyframes hit{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px) rotate(-8deg)}40%{transform:translateX(5px) rotate(8deg)}60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
+ .slot.dur{margin-bottom:10px}
+ .slot .pips{position:absolute;left:0;right:0;bottom:-11px;display:flex;gap:2px;justify-content:center}
+ .slot .pip{width:6px;height:6px;border-radius:50%;background:#333;border:1px solid #666;box-sizing:border-box}
+ .slot .pip.on{background:#ff5252;border-color:#ffb3b3}
+ .slot.broken{border:2px solid #a33;background:#211}.slot.broken svg{filter:grayscale(.6)}
+ #restartBtn{margin-top:auto;width:38px;height:38px;border-radius:8px;border:1px solid #555;background:#222;color:#ddd;font-size:20px;cursor:pointer}
+ #restartBtn:hover{background:#333}
+ @keyframes pop{0%{transform:scale(.3)}60%{transform:scale(1.35)}100%{transform:scale(1)}}
+ #toast{position:absolute;left:78px;bottom:40px;background:#000d;border:1px solid #888;border-radius:8px;padding:5px 12px;direction:rtl;opacity:0;transition:opacity .25s;pointer-events:none;z-index:4}
+ #toast.on{opacity:1}
+ kbd{background:#444;border-radius:3px;padding:0 5px}
+</style></head><body>
+<div id="bar">arrows / WASD / numpad (diagonals ok) &middot; or hold the mouse/finger to walk toward it &middot; <kbd>R</kbd> restart</div>
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="toast"></div>
+<div id="hud"><span class="lbl">items</span><span id="slots"></span><button id="restartBtn" title="Restart (R)">↻</button></div>
+<script src="game-core.js"></script>
+<script>
+(async () => {
+  const MC = window.MazeCore;
+  const ann = await (await fetch('annotations.json')).json();
+  const cfg = await fetch('game.json').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+  const img = await new Promise(r => { const i = new Image(); i.onload = () => r(i); i.src = ann.image.file || 'work.jpg'; });
+  const W = ann.image.w, H = ann.image.h;
+  const cv = document.getElementById('c'), ctx = cv.getContext('2d'); cv.width = W; cv.height = H;
+  const field = MC.buildField(ann.lines, W, H), speed = MC.speedFor(W, H);
+  let G = MC.createGame(ann, cfg, field);
+
+  /* ---------- HUD: one slot per item, filled when picked up ---------- */
+  const GOGGLES = '<svg viewBox="0 0 32 32"><path d="M1 13 Q16 8 31 13" stroke="#fc3" stroke-width="3" fill="none"/><circle cx="9" cy="19" r="7" fill="#8df" stroke="#fc3" stroke-width="3"/><circle cx="23" cy="19" r="7" fill="#8df" stroke="#fc3" stroke-width="3"/><path d="M16 19h0" stroke="#fc3" stroke-width="3"/><path d="M6 17q2-2 4-1M20 17q2-2 4-1" stroke="#fff" stroke-width="1.5" fill="none"/></svg>';
+  const SWORD = '<svg viewBox="0 0 32 32"><path d="M8 24 L25 7" stroke="#e3edf2" stroke-width="4.5" stroke-linecap="round"/><path d="M8 24 L25 7" stroke="#90a4ae" stroke-width="1.2" stroke-linecap="round"/><path d="M25 7 L29 3 L28.5 8 Z" fill="#fff"/><path d="M9 18 L14 23" stroke="#c9a227" stroke-width="3.5" stroke-linecap="round"/><path d="M8 24 L4 28" stroke="#8d5524" stroke-width="4" stroke-linecap="round"/></svg>';
+  const BROKEN_SWORD = '<svg viewBox="0 0 32 32"><path d="M8 24 L15 17" stroke="#b0bec5" stroke-width="4.5" stroke-linecap="round"/><path d="M19 13 L16.5 14 L18 11 L15.5 10.5" stroke="#b0bec5" stroke-width="1.5" fill="none"/><path d="M22 11 L26 7" stroke="#b0bec5" stroke-width="4" stroke-linecap="round"/><path d="M9 18 L14 23" stroke="#c9a227" stroke-width="3.5" stroke-linecap="round"/><path d="M8 24 L4 28" stroke="#8d5524" stroke-width="4" stroke-linecap="round"/><path d="M26 14 l3 3 m0 -3 l-3 3" stroke="#f55" stroke-width="2"/></svg>';
+  const CONTROLLER = '<svg viewBox="0 0 32 32"><rect x="2" y="9" width="28" height="15" rx="7" fill="#546e7a" stroke="#cfd8dc" stroke-width="1.8"/><path d="M9 13v7M5.5 16.5h7" stroke="#eceff1" stroke-width="2.2" stroke-linecap="round"/><circle cx="21" cy="14.5" r="2" fill="#ef5350"/><circle cx="25" cy="18.5" r="2" fill="#66bb6a"/><circle cx="17" cy="18.5" r="1.4" fill="#ffee58"/></svg>';
+  const ICONS = { goggles: GOGGLES, sword: SWORD, controller: CONTROLLER };
+  const slotsEl = document.getElementById('slots'); slotsEl.style.display = 'flex'; slotsEl.style.flexDirection = 'column'; slotsEl.style.gap = '8px';
+  function buildSlots() {
+    slotsEl.innerHTML = '';
+    for (const it of G.items) {
+      const d = document.createElement('div'); d.className = 'slot' + (it.durability ? ' dur' : ''); d.dataset.id = it.id; d.dataset.tip = it.label || it.id; d.tabIndex = 0;
+      d.innerHTML = ICONS[it.icon || it.id] || '<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="#fc3"/></svg>';
+      if (it.durability) { const pips = document.createElement('div'); pips.className = 'pips'; for (let i = 0; i < it.durability; i++) pips.appendChild(Object.assign(document.createElement('i'), { className: 'pip' })); d.appendChild(pips); }
+      slotsEl.appendChild(d);
+    }
+  }
+  buildSlots();
+  // keep the durability dots / broken look in sync with the game state
+  function updateHud() {
+    for (const it of G.items) {
+      const el = slotsEl.querySelector(`[data-id="${it.id}"]`); if (!el || !it.durability) continue;
+      const d = G.dur[it.id] || 0, broken = G.broken.has(it.id);
+      el.querySelectorAll('.pip').forEach((p, i) => p.classList.toggle('on', i < d));
+      el.dataset.tip = broken ? 'החרב נשברה' : `${it.label || it.id} · ${d}/${it.durability}`;
+      if (broken && !el.classList.contains('broken')) { el.classList.add('full', 'broken'); el.firstElementChild.outerHTML = BROKEN_SWORD; }
+    }
+  }
+  const toast = document.getElementById('toast'); let toastT;
+  const say = t => { toast.textContent = t; toast.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => toast.classList.remove('on'), 2200); };
+
+  /* ---------- win animation ---------- */
+  let confetti = [], winT = 0;
+  function startWin() {
+    winT = performance.now(); const c = MC.regionCenter(G.goal);
+    for (let i = 0; i < 220; i++) { const a = Math.random() * 6.283, v = 90 + Math.random() * 380;
+      confetti.push({ x: c[0], y: c[1], vx: Math.cos(a) * v, vy: Math.sin(a) * v - 220, rot: Math.random() * 6, vr: (Math.random() - .5) * 12, s: 5 + Math.random() * 8, col: `hsl(${Math.random() * 360},90%,58%)` }); }
+  }
+  function drawWin(now, dt) {
+    const t = (now - winT) / 1000;
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(.45, t * .5)})`; ctx.fillRect(0, 0, W, H);
+    for (const p of confetti) { p.vy += 520 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .995; p.rot += p.vr * dt;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; ctx.fillRect(-p.s / 2, -p.s / 3, p.s, p.s * .66); ctx.restore(); }
+    if (t < 6 && t > 1.2 && Math.random() < .05) { const c = [Math.random() * W, Math.random() * H * .5]; for (let i = 0; i < 40; i++) { const a = Math.random() * 6.283, v = 60 + Math.random() * 220; confetti.push({ x: c[0], y: c[1], vx: Math.cos(a) * v, vy: Math.sin(a) * v, rot: 0, vr: 6, s: 4 + Math.random() * 6, col: `hsl(${Math.random() * 360},95%,60%)` }); } }
+    confetti = confetti.filter(p => p.y < H + 40);
+    const sc = Math.min(1, t * 2.2), bounce = 1 + .06 * Math.sin(t * 6), size = Math.round(H * .13 * (sc < 1 ? sc * 1.15 : bounce));
+    ctx.save(); ctx.translate(W / 2, H * .42); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'rtl';
+    ctx.font = `bold ${size}px system-ui, sans-serif`; ctx.lineWidth = size * .12; ctx.strokeStyle = '#000'; ctx.fillStyle = '#ffd23f';
+    ctx.strokeText('ניצחת!', 0, 0); ctx.fillText('ניצחת!', 0, 0);
+    ctx.font = `${Math.round(H * .035)}px system-ui, sans-serif`; ctx.lineWidth = 4; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000';
+    ctx.strokeText('R / לחצו כאן לשחק שוב', 0, size * .9); ctx.fillText('R / לחצו כאן לשחק שוב', 0, size * .9);
+    ctx.restore();
+  }
+
+  /* ---------- drawing ---------- */
+  const rpath = r => { ctx.beginPath(); if (r.shape === 'ellipse') ctx.ellipse(r.cx, r.cy, r.rx, r.ry, 0, 0, 7); else { ctx.moveTo(r.pts[0][0], r.pts[0][1]); r.pts.forEach(p => ctx.lineTo(p[0], p[1])); ctx.closePath(); } };
+  // portals flagged "dashed" in the editor are shown to the player as a dashed line (marching slowly)
+  function drawPortalLines(now) {
+    const lines = MC.visiblePortalLines(G.regions, G.portals); if (!lines.length) return;
+    const wdt = Math.max(2.5, W / 450);
+    ctx.save(); ctx.lineCap = 'round'; ctx.setLineDash([wdt * 3.2, wdt * 2.6]); ctx.lineDashOffset = -(now / 90) % (wdt * 5.8);
+    for (const l of lines) {
+      ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = wdt * 2.2; ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
+      ctx.strokeStyle = '#7b1fa2'; ctx.lineWidth = wdt; ctx.beginPath(); ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    for (const l of lines) { // arrowheads only for one-way portals
+      const ang = Math.atan2(l.y2 - l.y1, l.x2 - l.x1), s = wdt * 5;
+      const head = (x, y, a) => { ctx.fillStyle = '#7b1fa2'; ctx.strokeStyle = '#fff'; ctx.lineWidth = wdt * .7; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - s * Math.cos(a - .45), y - s * Math.sin(a - .45)); ctx.lineTo(x - s * Math.cos(a + .45), y - s * Math.sin(a + .45)); ctx.closePath(); ctx.stroke(); ctx.fill(); };
+      if (l.dir === 'ab') head(l.x2, l.y2, ang); else if (l.dir === 'ba') head(l.x1, l.y1, ang + Math.PI);
+    }
+    ctx.restore();
+  }
+  function drawTitle() {
+    const t = cfg.title; if (!t) return; const [x, y, w, h] = t.box;
+    ctx.save(); ctx.fillStyle = '#fbfaf5'; ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, 12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'rtl';
+    let size = Math.round(h * .7); ctx.font = `bold ${size}px system-ui, sans-serif`;
+    while (ctx.measureText(t.text).width > w * .9 && size > 8) { size -= 2; ctx.font = `bold ${size}px system-ui, sans-serif`; }
+    ctx.fillText(t.text, x + w / 2, y + h / 2 + size * .05); ctx.restore();
+  }
+  /* ---------- fights, sparks, floating text, rings ---------- */
+  let fx = { fights: [], sparks: [], floaters: [], rings: [], freezeUntil: 0, shake: 0 };
+  const bbox = r => r.shape === 'ellipse' ? [r.cx - r.rx, r.cy - r.ry, r.cx + r.rx, r.cy + r.ry] : [Math.min(...r.pts.map(p => p[0])), Math.min(...r.pts.map(p => p[1])), Math.max(...r.pts.map(p => p[0])), Math.max(...r.pts.map(p => p[1]))];
+  function startFight(m, now) {
+    fx.fights.push({ m, t0: now }); fx.freezeUntil = now + 900; fx.shake = now;
+    const c = MC.regionCenter(m);
+    for (let i = 0; i < 46; i++) { const a = Math.random() * 6.283, v = 120 + Math.random() * 330; fx.sparks.push({ x: c[0], y: c[1], vx: Math.cos(a) * v, vy: Math.sin(a) * v, t0: now, life: .6 + Math.random() * .5, col: Math.random() < .5 ? '#ff3b30' : Math.random() < .5 ? '#ffd23f' : '#fff' }); }
+  }
+  function drawMonsters(now) {
+    G.monsters.forEach((m, idx) => {
+      const fa = fx.fights.find(f => f.m === m);
+      if (!fa) {
+        if (G.defeated.has(m.id)) return;
+        ctx.save(); rpath(m); ctx.fillStyle = `rgba(225,30,30,${.15 + .08 * Math.sin(now / 420 + idx * 1.7)})`; ctx.fill();
+        ctx.strokeStyle = `rgba(200,0,0,${.5 + .25 * Math.sin(now / 420 + idx * 1.7)})`; ctx.lineWidth = Math.max(2, W / 600); ctx.setLineDash([10, 7]); ctx.lineDashOffset = -now / 60; ctx.stroke(); ctx.restore(); return;
+      }
+      const a = (now - fa.t0) / 1000; if (a > 1.2) return;
+      const k = Math.max(0, 1 - a / 1.0), b = bbox(m), amp = Math.max(b[2] - b[0], b[3] - b[1]) * .07 * k, c = MC.regionCenter(m);
+      ctx.save(); rpath(m); ctx.clip();                       // the monster itself: the drawn art shakes and pulses
+      ctx.translate(c[0] + Math.sin(a * 75) * amp, c[1] + Math.cos(a * 58) * amp * .6); const sc = 1 + .1 * Math.sin(a * 32) * k; ctx.scale(sc, sc); ctx.translate(-c[0], -c[1]);
+      ctx.drawImage(img, 0, 0); ctx.restore();
+      ctx.save(); rpath(m); ctx.fillStyle = `rgba(255,20,20,${Math.min(.85, (.25 + .5 * Math.abs(Math.sin(a * 22))) * (.35 + k))})`; ctx.fill(); ctx.restore();
+    });
+  }
+  function drawFx(now, dt) {
+    const sw = fx.shake ? Math.max(0, 1 - (now - fx.shake) / 700) : 0;
+    if (sw > 0) { const f = ctx.fillStyle; ctx.fillStyle = `rgba(255,0,0,${.28 * Math.abs(Math.sin((now - fx.shake) / 1000 * 18)) * sw})`; ctx.fillRect(0, 0, W, H); ctx.fillStyle = f; } // red flashing background
+    for (const p of fx.sparks) { const t = (now - p.t0) / 1000; if (t > p.life) continue; ctx.globalAlpha = 1 - t / p.life; ctx.fillStyle = p.col; const x = p.x + p.vx * t, y = p.y + p.vy * t + 220 * t * t; ctx.fillRect(x - 3, y - 3, 6, 6); }
+    ctx.globalAlpha = 1; fx.sparks = fx.sparks.filter(p => (now - p.t0) / 1000 <= p.life);
+    for (const f of fx.floaters) { const t = (now - f.t0) / 1000; if (t > 1.4) continue; ctx.globalAlpha = Math.min(1, 1.6 - t); ctx.font = `bold ${Math.round(H * .045)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.direction = 'ltr'; ctx.lineWidth = 5; ctx.strokeStyle = '#000'; ctx.fillStyle = f.col; ctx.strokeText(f.text, f.x, f.y - t * H * .07); ctx.fillText(f.text, f.x, f.y - t * H * .07); }
+    ctx.globalAlpha = 1; fx.floaters = fx.floaters.filter(f => (now - f.t0) / 1000 <= 1.4);
+    for (const r of fx.rings) { const t = (now - r.t0) / 1000; if (t > .8) continue; ctx.strokeStyle = `rgba(160,90,255,${1 - t / .8})`; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(r.x, r.y, (r.out ? t : .8 - t) / .8 * H * .09 + 4, 0, 7); ctx.stroke(); }
+    fx.rings = fx.rings.filter(r => (now - r.t0) / 1000 <= .8); fx.fights = fx.fights.filter(f => (now - f.t0) / 1000 <= 1.3);
+  }
+  // megaportal number picker: numbers appear over each destination and take turns growing and shrinking
+  const choiceR = () => Math.max(20, H * .03);
+  function choicePos() { return G.mega.choices.map(c => MC.regionCenter(c.r)); }
+  function drawChoice(now) {
+    const m = G.mega, t = now / 1000, n = m.choices.length, pos = choicePos(), c0 = MC.regionCenter(m.r), R0 = choiceR();
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.fillRect(0, 0, W, H);
+    ctx.save(); ctx.setLineDash([9, 9]); ctx.lineDashOffset = -t * 40; ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 3;
+    pos.forEach(p => { ctx.beginPath(); ctx.moveTo(c0[0], c0[1]); ctx.lineTo(p[0], p[1]); ctx.stroke(); }); ctx.restore();
+    const ph = (t * 1.6) % n;
+    pos.forEach((p, i) => {
+      const d = Math.min(Math.abs(ph - i), n - Math.abs(ph - i)), s = 1 + .75 * Math.max(0, 1 - d * 1.25);
+      ctx.beginPath(); ctx.arc(p[0], p[1], R0 * s * 1.55, 0, 7); ctx.fillStyle = `rgba(255,210,63,${.18 + .22 * (s - 1)})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(p[0], p[1], R0 * s, 0, 7); ctx.fillStyle = '#ffd23f'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#3a2a00'; ctx.stroke();
+      ctx.fillStyle = '#2b1d00'; ctx.font = `bold ${Math.round(R0 * 1.35 * s)}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'ltr'; ctx.fillText(m.choices[i].label, p[0], p[1] + R0 * .06 * s);
+    });
+    const topClear = Math.min(...pos.map(p => p[1])) - R0 * 2.2 > H * .24, ty = topClear ? H * .1 : H * .86;
+    const size = Math.round(H * .075 * (1 + .05 * Math.sin(t * 4)));
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.direction = 'rtl'; ctx.font = `bold ${size}px system-ui, sans-serif`; ctx.lineWidth = size * .14; ctx.strokeStyle = '#000'; ctx.fillStyle = '#fff';
+    ctx.strokeText(m.prompt || 'בחר מספר', W / 2, ty); ctx.fillText(m.prompt || 'בחר מספר', W / 2, ty);
+    ctx.font = `${Math.round(H * .028)}px system-ui, sans-serif`; ctx.lineWidth = 4; ctx.strokeText('הקישו מספר או לחצו עליו · Esc לביטול', W / 2, ty + size * .85); ctx.fillText('הקישו מספר או לחצו עליו · Esc לביטול', W / 2, ty + size * .85);
+  }
+  function chooseAt(p) { const R = choiceR() * 1.9; const i = choicePos().findIndex(c => Math.hypot(c[0] - p.x, c[1] - p.y) <= R); return i; }
+
+  function draw(now, dt) {
+    const sh = fx.shake ? Math.max(0, 1 - (now - fx.shake) / 600) : 0;
+    ctx.save(); if (sh > 0) ctx.translate(Math.sin(now * .09) * W * .006 * sh, Math.cos(now * .11) * W * .004 * sh);
+    ctx.drawImage(img, 0, 0);
+    for (const tnt of cfg.tint || []) { const r = MC.findRegion(G.regions, tnt.region); if (!r) continue; ctx.save(); rpath(r); ctx.fillStyle = tnt.color || 'rgba(90,180,255,.4)'; ctx.fill(); ctx.restore(); }
+    drawPortalLines(now);
+    drawMonsters(now);
+    drawTitle();
+    MC.drawHero(ctx, G.hero, now);
+    drawFx(now, dt);
+    if (G.choosing) drawChoice(now);
+    if (G.won) drawWin(now, dt);
+    ctx.restore();
+  }
+
+  /* ---------- input + loop ---------- */
+  const keys = new Set(); let pointer = null;
+  function restart() { G = MC.createGame(ann, cfg, field); confetti = []; fx = { fights: [], sparks: [], floaters: [], rings: [], freezeUntil: 0, shake: 0 }; buildSlots(); updateHud(); toast.classList.remove('on'); }
+  document.getElementById('restartBtn').onclick = e => { restart(); e.target.blur(); };
+  let last = performance.now(), lastLock = 0;
+  function handle(ev, now) {
+    for (const e of ev) {
+      if (e.type === 'pickup') {
+        const s = slotsEl.querySelector(`[data-id="${e.item.id}"]`); if (s) { s.classList.add('full', 'pop'); setTimeout(() => s.classList.remove('pop'), 700); }
+        say(e.item.durability ? `${e.item.label || e.item.id} (${e.item.durability})` : (e.item.label || e.item.id)); updateHud();
+      } else if (e.type === 'fight') {
+        startFight(e.monster, now); const s = slotsEl.querySelector(`[data-id="${e.item}"]`);
+        if (s) { s.classList.remove('hit'); void s.offsetWidth; s.classList.add('hit'); }
+        const max = (G.items.find(i => i.id === e.item) || {}).durability;
+        fx.floaters.push({ x: G.hero.x, y: G.hero.y - 14, text: '\u22121', col: '#ff5252', t0: now });
+        say(e.broken ? 'החרב נשברה!' : `המפלצת הובסה! החרב: ${e.dur}/${max}`); updateHud();
+      } else if (e.type === 'locked' && now - lastLock > 2500) { lastLock = now; say(e.lock.hint || 'locked'); }
+      else if (e.type === 'megalocked') say(G.mega.lockedHint || 'locked');
+      else if (e.type === 'choose') { keys.clear(); pointer = null; }
+      else if (e.type === 'megaport') { fx.rings.push({ x: e.from[0], y: e.from[1], t0: now, out: false }, { x: e.to[0], y: e.to[1], t0: now, out: true }); say(`נבחר מספר ${e.choice.label}`); }
+      else if (e.type === 'win') startWin();
+    }
+  }
+  function choose(i) { handle(MC.megaChoose(G, i), performance.now()); }
+  addEventListener('keydown', e => {
+    if (G.choosing) {
+      e.preventDefault();
+      if (e.code === 'Escape') { MC.megaCancel(G); return; }
+      const d = (e.code.match(/^(?:Digit|Numpad)(\d)$/) || [])[1]; if (d) { const i = G.mega.choices.findIndex(c => c.key === d); if (i >= 0) choose(i); }
+      return;
+    }
+    if (e.code.startsWith('Arrow') || e.code.startsWith('Numpad') || ['Home','End','PageUp','PageDown','Space'].includes(e.code)) e.preventDefault();
+    keys.add(e.code); if (e.code === 'KeyR') restart();
+  });
+  addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
+  const toImg = e => { const b = cv.getBoundingClientRect(); return { x: (e.clientX - b.left) * W / b.width, y: (e.clientY - b.top) * H / b.height }; };
+  cv.addEventListener('pointerdown', e => {
+    if (G.choosing) { const i = chooseAt(toImg(e)); if (i >= 0) choose(i); return; }
+    if (G.won && performance.now() - winT > 800) { restart(); return; } pointer = toImg(e); cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointermove', e => { if (pointer) pointer = toImg(e); });
+  cv.addEventListener('pointerup', () => pointer = null); cv.addEventListener('pointercancel', () => pointer = null);
+  window.__game = () => G; window.__fx = () => fx; // for tests
+  updateHud();
+  (function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    let v = MC.keyVector(keys); if (!v[0] && !v[1]) v = MC.pointerVector(G.hero, pointer);
+    if (now < fx.freezeUntil) v = [0, 0];                       // the hero pauses while a fight plays out
+    handle(MC.stepGame(G, v[0], v[1], speed * dt), now);
+    draw(now, dt); requestAnimationFrame(loop);
+  })(last);
+})();
+</script></body></html>

@@ -1,0 +1,21 @@
+{
+  "start": "start",
+  "goal": "finish",
+  "items": [
+    { "id": "sword", "region": "sword", "icon": "sword", "label": "החרב אצלך", "durability": 5 },
+    { "id": "controller", "region": "controller", "icon": "controller", "label": "השלט אצלך" }
+  ],
+  "monsters": {
+    "pattern": "^mm\\d+$", "needs": "sword",
+    "hint": "צריך חרב כדי לעבור את המפלצת",
+    "brokenHint": "החרב נשברה! אי אפשר לעבור את המפלצת"
+  },
+  "megaportal": {
+    "region": "mp", "needs": "controller", "prompt": "בחר מספר",
+    "lockedHint": "המגה-פורטל כבוי — צריך את השלט",
+    "choices": [
+      { "label": "1", "region": "mpt1" }, { "label": "2", "region": "mpt2" },
+      { "label": "3", "region": "mpt3" }, { "label": "4", "region": "mpt4" }
+    ]
+  }
+}

@@ -206,49 +206,119 @@
   const names = (v) => (Array.isArray(v) ? v : [v]).filter(Boolean);
   const findAny = (regions, v) => { for (const n of names(v)) { const r = MC.findRegion(regions, n); if (r) return r; } return null; };
 
+  // regions picked by a spec: {regions:["a","b"]} or {pattern:"^mm\\d+$"}
+  const pickRegions = (regions, spec) => {
+    if (!spec) return [];
+    if (spec.regions) return spec.regions.map((n) => MC.findRegion(regions, n)).filter(Boolean);
+    if (spec.pattern) { const re = new RegExp(spec.pattern, "i"); return regions.filter((r) => re.test((r.name || "").trim())); }
+    return [];
+  };
+
+  /* extra rules (all optional, from game.json):
+   *   items[].durability        number of uses; used up by monsters
+   *   monsters {pattern|regions, needs:"sword", cost:1, hint, brokenHint}
+   *        a live monster blocks the hero unless the needed item is held with durability left.
+   *        Entering it is a fight: durability drops by `cost`, the monster is defeated for good,
+   *        and at 0 the item breaks (gone for good, it cannot be picked up again).
+   *   megaportal {region:"mp", needs:"controller", prompt, lockedHint, choices:[{label, key, region}]}
+   *        entering the region with the needed item pauses the hero ("choosing"); megaChoose(g, i) teleports.
+   *        Ordinary portals starting in that region are ignored (the player chooses instead).
+   */
   MC.createGame = function (ann, cfg, field) {
     cfg = cfg || {};
-    const regions = ann.regions || [], portals = ann.portals || [], radius = ann.hero_radius || 4;
-    const g = { regions, portals, cfg, field, has: new Set(), won: false, events: [], blockedHint: null };
+    const regions = ann.regions || [], radius = ann.hero_radius || 4;
+    const g = { regions, cfg, field, has: new Set(), picked: new Set(), broken: new Set(), defeated: new Set(), dur: {}, won: false, choosing: false, events: [], blockedHint: null };
     g.items = (cfg.items || []).map((it) => ({ ...it, r: findAny(regions, it.region) }));
     g.locks = (cfg.locks || []).map((l) => ({ ...l, r: findAny(regions, l.region) })).filter((l) => l.r);
     g.goal = findAny(regions, cfg.goal || "goal");
     g.startRegion = findAny(regions, cfg.start || "start");
+    const mc = cfg.monsters;
+    g.monsterCfg = mc ? { needs: mc.needs || "sword", cost: mc.cost || 1, hint: mc.hint, brokenHint: mc.brokenHint } : null;
+    g.monsters = mc ? pickRegions(regions, mc) : [];
+    const mg = cfg.megaportal, mr = mg && findAny(regions, mg.region);
+    g.mega = mr ? { r: mr, needs: mg.needs, prompt: mg.prompt, lockedHint: mg.lockedHint, armed: true,
+      choices: (mg.choices || []).map((c) => ({ label: c.label, key: String(c.key || c.label), r: findAny(regions, c.region) })).filter((c) => c.r) } : null;
+    g.portals = g.mega ? (ann.portals || []).filter((p) => p.a !== g.mega.r.id) : (ann.portals || []);
     g.touch = radius + 6;
-    g.blocked = (x, y) => g.locks.some((l) => !g.has.has(l.needs) && MC.regionContains(l.r, x, y));
+    g.canFight = () => !!g.monsterCfg && g.has.has(g.monsterCfg.needs) && (g.dur[g.monsterCfg.needs] === undefined || g.dur[g.monsterCfg.needs] > 0);
+    g.monsterAt = (x, y) => g.monsters.find((m) => !g.defeated.has(m.id) && MC.regionContains(m, x, y)) || null;
+    g.blocked = (x, y) => g.locks.some((l) => !g.has.has(l.needs) && MC.regionContains(l.r, x, y)) || (!!g.monsterAt(x, y) && !g.canFight());
     const c = g.startRegion ? MC.regionCenter(g.startRegion) : [ann.image.w / 2, ann.image.h / 2];
     const p = MC.nearestWalkable(field, c[0], c[1], radius, 80);
     g.hero = MC.newHero(p[0], p[1], radius);
-    for (const q of portals) for (const id of [q.a, q.b]) {
-      const R = regions.find((r) => r.id === id);
-      if (R && MC.regionContains(R, g.hero.x, g.hero.y)) g.hero.inactive.add(id);
-    }
+    markInactive(g);
     return g;
   };
 
-  // one simulation step: move, then portals, pickups, goal. Returns list of events fired.
+  function markInactive(g) { // portal regions we are standing in must be left before they can fire
+    for (const q of g.portals) for (const id of [q.a, q.b]) {
+      const R = g.regions.find((r) => r.id === id);
+      if (R && MC.regionContains(R, g.hero.x, g.hero.y)) g.hero.inactive.add(id);
+    }
+  }
+
+  // everything that can happen once the hero stands somewhere: pickups, fights, megaportal, goal
+  function settle(g, ev, withPortals) {
+    const h = g.hero;
+    if (withPortals) { const hop = MC.updatePortals(g.field, h, g.regions, g.portals); if (hop) ev.push({ type: "portal", ...hop }); }
+    for (const it of g.items) {
+      if (it.r && !g.picked.has(it.id) && MC.regionTouches(it.r, h.x, h.y, g.touch)) {
+        g.picked.add(it.id); g.has.add(it.id);
+        if (it.durability != null) g.dur[it.id] = it.durability;
+        ev.push({ type: "pickup", item: it });
+      }
+    }
+    if (g.monsterCfg) for (const m of g.monsters) {
+      if (g.defeated.has(m.id) || !MC.regionContains(m, h.x, h.y) || !g.canFight()) continue;
+      const n = g.monsterCfg.needs; g.defeated.add(m.id); g.dur[n] = Math.max(0, (g.dur[n] === undefined ? 1 : g.dur[n]) - g.monsterCfg.cost);
+      const broke = g.dur[n] <= 0; if (broke) { g.has.delete(n); g.broken.add(n); }
+      ev.push({ type: "fight", monster: m, dur: g.dur[n], broken: broke, item: n });
+    }
+    if (g.mega) {
+      const inside = MC.regionTouches(g.mega.r, h.x, h.y, g.touch);
+      if (!inside) g.mega.armed = true;
+      else if (g.mega.armed) {
+        g.mega.armed = false; // fires once per visit; leave the region to re-arm
+        if (g.has.has(g.mega.needs)) { g.choosing = true; ev.push({ type: "choose" }); } else ev.push({ type: "megalocked" });
+      }
+    }
+    if (g.goal && MC.regionTouches(g.goal, h.x, h.y, g.touch)) { g.won = true; ev.push({ type: "win" }); }
+  }
+
+  // one simulation step: move, then portals, pickups, fights, megaportal, goal. Returns the events fired.
   MC.stepGame = function (g, vx, vy, dist) {
     const ev = [], h = g.hero;
-    if (g.won) return ev;
+    if (g.won || g.choosing) return ev;
+    g.blockedHint = null;
     if (vx || vy) {
       const x0 = h.x, y0 = h.y;
       MC.moveHero(g.field, h, vx, vy, dist, g.blocked);
-      // pressing into a locked region (and not moving) -> remember which one, so the UI can explain
-      g.blockedHint = null;
-      if (h.x === x0 && h.y === y0) {
+      if (h.x === x0 && h.y === y0) { // pressing into something that blocks: tell the UI why
         const ax = h.x + vx * 3, ay = h.y + vy * 3;
         const l = g.locks.find((k) => !g.has.has(k.needs) && MC.regionContains(k.r, ax, ay));
         if (l) { g.blockedHint = l; ev.push({ type: "locked", lock: l }); }
+        else if (g.monsterCfg && g.monsterAt(ax, ay) && !g.canFight()) {
+          const hint = { hint: g.broken.has(g.monsterCfg.needs) ? g.monsterCfg.brokenHint : g.monsterCfg.hint };
+          g.blockedHint = hint; ev.push({ type: "locked", lock: hint, monster: g.monsterAt(ax, ay) });
+        }
       }
     }
-    const hop = MC.updatePortals(g.field, h, g.regions, g.portals);
-    if (hop) ev.push({ type: "portal", ...hop });
-    for (const it of g.items) {
-      if (it.r && !g.has.has(it.id) && MC.regionTouches(it.r, h.x, h.y, g.touch)) { g.has.add(it.id); ev.push({ type: "pickup", item: it }); }
-    }
-    if (g.goal && MC.regionTouches(g.goal, h.x, h.y, g.touch)) { g.won = true; ev.push({ type: "win" }); }
+    settle(g, ev, true);
     return ev;
   };
+
+  // the player picked destination number i (index into mega.choices) while g.choosing
+  MC.megaChoose = function (g, i) {
+    const m = g.mega, ev = [];
+    if (!m || !g.choosing || !m.choices[i]) return ev;
+    const c = m.choices[i], ctr = MC.regionCenter(c.r), p = MC.nearestWalkable(g.field, ctr[0], ctr[1], g.hero.r, 60);
+    const from = [g.hero.x, g.hero.y];
+    g.hero.x = p[0]; g.hero.y = p[1]; g.choosing = false; g.hero.inactive.clear(); markInactive(g);
+    ev.push({ type: "megaport", choice: c, index: i, from, to: [p[0], p[1]] });
+    settle(g, ev, false);
+    return ev;
+  };
+  MC.megaCancel = function (g) { g.choosing = false; }; // stays disarmed until the hero leaves the region
 
   MC.HERO_VISUAL_SCALE = 1.5; // drawn size relative to the old look; collision always uses hero.r
   // Draws the hero: a slowly pulsating halo (purely visual) + the round face. Collision only ever uses hero.r.

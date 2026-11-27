@@ -68,6 +68,19 @@ Rules live next to the annotations (not inside them) and are exported with the g
 }
 ```
 
+Optional extra rules (used by `games/maze_nightmare`):
+
+```jsonc
+  "items":    [ { "id": "sword", "region": "sword", "icon": "sword", "label": "…", "durability": 5 } ],   // durability: shown as dots in the item bar
+  "monsters": { "pattern": "^mm\\d+$", "needs": "sword", "hint": "…", "brokenHint": "…" },            // regions matching the pattern (or "regions": [names])
+  "megaportal": { "region": "mp", "needs": "controller", "prompt": "בחר מספר", "lockedHint": "…",
+                  "choices": [ { "label": "1", "region": "mpt1" }, … ] }
+```
+
+- A live **monster** blocks the hero like a wall unless they hold the needed item with durability left. Entering it is a fight (monster shakes, red flash, sparks, the hero pauses briefly): durability drops by 1, the monster is gone for good, and at 0 the item breaks and cannot be picked up again.
+- The **megaportal**: with the needed item, entering the region pauses the hero and shows numbers over each destination that take turns growing; press the number or click it (`Esc` cancels; leave the region and come back to ask again). Ordinary portals that start in that region are ignored. Without the item it says so and does nothing.
+- `node test/reach2.js <folder>` searches every combination of items / defeated monsters and reports whether the finish is reachable, the fewest monsters a winning run must fight, and which choices matter. `.venv/bin/python test/nightmare_smoke.py <folder>` plays these rules in a headless browser.
+
 Items and the goal trigger when the hero *touches* the region (a few px tolerance), because pencil lines inside a region can keep the hero's centre out of it.
 `node test/reach.js games/maze1` checks the goal is reachable (and `NOKEYS=1` that it is not reachable without the items).
 

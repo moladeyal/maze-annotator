@@ -125,4 +125,55 @@ const arcs = []; const cx2 = new Proxy({}, { get: (_, k) => k === "createRadialG
 h = MC.newHero(50, 50, 4); MC.drawHero(cx2, h, 0);
 ok(arcs.some((a) => Math.abs(a[2] - (4 + 2.5) * 1.5) < 1e-9), "hero body is drawn 50% larger (radius " + ((4 + 2.5) * 1.5) + ")");
 ok(h.r === 4 && MC.walkable(f, 50, 50, h.r) && !MC.walkable(f, 103, 50, h.r), "navigation still uses the original radius");
+// ---- monsters + sword durability, controller + megaportal
+{
+  const sqr = (id, name, x, y, w = 10, h = 10) => ({ id, name, shape: "polygon", pts: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
+  const open = MC.buildField([box(5, 5, 195, 105)], 200, 110); // one big open room
+  const A = { image: { w: 200, h: 110 }, hero_radius: 3, portals: [
+      { id: "m1", a: "mp", b: "d1", dir: "ab" }, { id: "m2", a: "mp", b: "d2", dir: "ab" }],
+    regions: [sqr("s", "start", 10, 50), sqr("w", "sword", 30, 80), sqr("c", "controller", 30, 10), sqr("mp", "mp", 60, 50, 14, 14),
+      sqr("d1", "d1", 160, 10), sqr("d2", "d2", 160, 90), sqr("f", "finish", 185, 50),
+      sqr("a", "mm1", 90, 40, 8, 40), sqr("b", "mm2", 110, 40, 8, 40), sqr("z", "mm3", 130, 40, 8, 40)] };
+  const C = { goal: "finish", items: [{ id: "sword", region: "sword", durability: 2 }, { id: "controller", region: "controller" }],
+    monsters: { pattern: "^mm\\d+$", needs: "sword", hint: "need sword", brokenHint: "sword broke" },
+    megaportal: { region: "mp", needs: "controller", prompt: "pick", choices: [{ label: "1", region: "d1" }, { label: "2", region: "d2" }] } };
+  const mk = () => MC.createGame(A, C, open);
+  const go = (g, dx, dy, d) => { let e = []; for (let i = 0; i < d; i++) e = e.concat(MC.stepGame(g, dx, dy, 1)); return e; };
+  const put = (g, x, y) => { g.hero.x = x; g.hero.y = y; };
+
+  let g = mk(); ok(g.monsters.length === 3, "monsters are picked by the name pattern");
+  put(g, 80, 60); let e = go(g, 1, 0, 40);
+  ok(g.hero.x < 91 && g.hero.x > 85, "without a sword a monster blocks like a wall, x=" + g.hero.x);
+  ok(e.some((v) => v.type === "locked" && v.lock.hint === "need sword"), "and explains that a sword is needed");
+  ok(g.defeated.size === 0 && g.dur.sword === undefined, "nothing was fought");
+
+  g = mk(); put(g, 33, 83); go(g, 0, 0, 1);
+  ok(g.has.has("sword") && g.dur.sword === 2, "picking up the sword gives its full durability (2)");
+  put(g, 80, 60); e = go(g, 1, 0, 22);
+  const f1 = e.filter((v) => v.type === "fight");
+  ok(f1.length === 1 && f1[0].dur === 1 && !f1[0].broken && f1[0].monster.name === "mm1", "entering a monster is one fight: durability 2 -> 1");
+  ok(g.defeated.has("a") && g.hero.x > 98 && g.hero.x < 110, "the defeated monster is passed and gone");
+  e = go(g, -1, 0, 20); ok(e.filter((v) => v.type === "fight").length === 0 && g.dur.sword === 1, "walking back through a defeated monster costs nothing");
+  put(g, 104, 60); e = go(g, 1, 0, 12);
+  const f2 = e.filter((v) => v.type === "fight");
+  ok(f2.length === 1 && f2[0].dur === 0 && f2[0].broken && !g.has.has("sword") && g.broken.has("sword"), "the second fight breaks the sword (0 left, gone)");
+  put(g, 122, 60); e = go(g, 1, 0, 30);
+  ok(g.hero.x < 131 && e.some((v) => v.type === "locked" && v.lock.hint === "sword broke"), "with a broken sword the next monster blocks again, with its own message, x=" + g.hero.x);
+  put(g, 33, 83); go(g, 0, 0, 3); ok(!g.has.has("sword"), "a broken sword cannot be picked up again");
+
+  g = mk(); put(g, 70, 57); e = go(g, 0, 0, 1);
+  ok(e.some((v) => v.type === "megalocked") && !g.choosing, "megaportal is off without the controller (and says so)");
+  put(g, 33, 13); go(g, 0, 0, 1); ok(g.has.has("controller"), "controller picked up");
+  put(g, 40, 57); e = go(g, 1, 0, 25);
+  ok(g.choosing && e.some((v) => v.type === "choose"), "entering the megaportal with the controller starts the choice");
+  const hx = g.hero.x; e = go(g, 1, 0, 20); ok(g.hero.x === hx, "the hero is frozen while choosing");
+  e = MC.megaChoose(g, 1);
+  ok(!g.choosing && Math.abs(g.hero.x - 165) < 8 && Math.abs(g.hero.y - 95) < 8 && e.some((v) => v.type === "megaport" && v.choice.label === "2"), "choosing 2 teleports to destination 2");
+  ok(MC.megaChoose(g, 0).length === 0, "choosing when not choosing does nothing");
+  put(g, 40, 57); go(g, 1, 0, 25); ok(g.choosing, "re-entering after leaving asks again"); MC.megaCancel(g); ok(!g.choosing, "cancel closes the choice");
+  go(g, 0, 0, 3); ok(!g.choosing, "after cancel it does not re-open while still inside");
+  go(g, -1, 0, 30); go(g, 1, 0, 30); ok(g.choosing, "after leaving and coming back it opens again");
+  g = mk(); put(g, 180, 55); go(g, 1, 0, 3); ok(g.won, "reaching finish still wins");
+}
+
 console.log("core tests passed:", n);
